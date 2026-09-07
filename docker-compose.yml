@@ -1,0 +1,20 @@
+services:
+  tiku:
+    build: .
+    container_name: ocs-local-tiku
+    ports:
+      - "127.0.0.1:8000:8000"  # 限回环；局域网访问改为 "8000:8000"
+    volumes:
+      - tiku-data:/data
+    environment:
+      - TZ=Asia/Shanghai
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request;urllib.request.urlopen('http://127.0.0.1:8000/api/health', timeout=3)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+volumes:
+  tiku-data:

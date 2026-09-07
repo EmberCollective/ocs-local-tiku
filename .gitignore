@@ -20,3 +20,6 @@ htmlcov/
 # 系统
 .DS_Store
 Thumbs.db
+
+# Claude Code worktrees
+.claude/

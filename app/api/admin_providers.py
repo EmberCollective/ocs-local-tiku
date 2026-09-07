@@ -53,6 +53,12 @@ class ReorderBody(BaseModel):
     ids: list[str]
 
 
+class EnabledBody(BaseModel):
+    """启停请求体。"""
+
+    enabled: bool
+
+
 @router.get("/api/providers")
 async def list_providers(db: Database = Depends(get_db)) -> dict:
     return {"items": [_serialize(p) for p in await providers_repo.list_providers(db)]}
@@ -106,6 +112,22 @@ async def update_provider(
     if await providers_repo.get_provider(db, provider_id) is None:
         raise HTTPException(status_code=404, detail="provider 不存在")
     await providers_repo.update_provider(db, provider_id, body.model_dump(exclude_unset=True))
+    await rebuild_router(request)
+    updated = await providers_repo.get_provider(db, provider_id)
+    return _serialize(updated)
+
+
+@router.put("/api/providers/{provider_id}/enabled")
+async def set_provider_enabled(
+    provider_id: str,
+    body: EnabledBody,
+    request: Request,
+    db: Database = Depends(get_db),
+) -> dict:
+    """启停专用端点（enabled 不在通用更新字段内）。"""
+    if await providers_repo.get_provider(db, provider_id) is None:
+        raise HTTPException(status_code=404, detail="provider 不存在")
+    await providers_repo.set_enabled(db, provider_id, body.enabled)
     await rebuild_router(request)
     updated = await providers_repo.get_provider(db, provider_id)
     return _serialize(updated)

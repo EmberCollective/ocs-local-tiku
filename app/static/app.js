@@ -71,18 +71,21 @@ function asArray(payload) {
   return Array.isArray(list) ? list : [];
 }
 
-/** /api/stats 响应归一：容忍 today/total_stats/days 的字段别名。 */
+/** /api/stats 响应归一：适配实际契约 {today, total, daily}，容忍字段别名。 */
 function normalizeStats(raw) {
   const source = raw || {};
   const today = source.today || {};
-  const all = source.total_stats || source.cumulative || {};
-  const days = asArray(source.days || source.series).map((day) => ({
+  const all =
+    source.total_stats ||
+    source.cumulative ||
+    (source.total && typeof source.total === 'object' ? source.total : {});
+  const days = asArray(source.daily || source.days || source.series).map((day) => ({
     day: String(day.day || day.date || ''),
     hits: num(day.cache_hits ?? day.hits),
     misses: num(day.cache_misses ?? day.misses),
   }));
   return {
-    totalQuestions: num(source.total ?? source.total_questions),
+    totalQuestions: num(all.questions ?? source.total_questions),
     todayHits: num(today.cache_hits ?? today.hits),
     todayMisses: num(today.cache_misses ?? today.misses),
     todayLlmCalls: num(today.llm_calls),
@@ -369,9 +372,11 @@ function tikuApp() {
 
     async toggleProvider(provider) {
       const next = !provider.enabled;
-      const body = this.buildProviderBody(provider, next);
       await this.run(async () => {
-        await this.api('/api/providers/' + provider.id, { method: 'PUT', body });
+        await this.api('/api/providers/' + provider.id + '/enabled', {
+          method: 'PUT',
+          body: { enabled: next },
+        });
         await this.loadProviders();
       }, next ? '已启用「' + provider.name + '」' : '已停用「' + provider.name + '」');
     },

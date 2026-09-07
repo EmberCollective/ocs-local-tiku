@@ -241,3 +241,18 @@ class TestAdminAuth:
         resp = await client.get("/api/query", params={"title": "题目", "options": "A. 甲"})
         assert resp.status_code == 200
         assert resp.json()["code"] == 1
+
+
+async def test_set_enabled_endpoint(client, spy):
+    """启停走专用端点：改状态、触发 rebuild、404 校验。"""
+    created = (await client.post("/api/providers", json=PAYLOAD)).json()
+    resp = await client.put(f"/api/providers/{created['id']}/enabled", json={"enabled": False})
+    assert resp.status_code == 200
+    assert resp.json()["enabled"] is False
+    assert spy.rebuilds >= 1
+
+    items = (await client.get("/api/providers")).json()["items"]
+    assert items[0]["enabled"] is False
+
+    resp = await client.put("/api/providers/missing/enabled", json={"enabled": True})
+    assert resp.status_code == 404
