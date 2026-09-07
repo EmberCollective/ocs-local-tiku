@@ -15,9 +15,9 @@ MAX_LOG_LIMIT = 500
 
 
 class SettingsUpdate(BaseModel):
-    """设置部分更新：缺省键不改，未知键忽略。"""
+    """设置部分更新：缺省键不改，未知键 422 拒收。"""
 
-    model_config = ConfigDict(extra="ignore")
+    model_config = ConfigDict(extra="forbid")
 
     ttl_days: int | None = Field(default=None, ge=1)
     cleanup_batch_size: int | None = Field(default=None, ge=1)

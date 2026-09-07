@@ -12,7 +12,7 @@ import litellm  # noqa: E402
 from litellm import Router, acompletion  # noqa: E402
 
 from app.db import Database
-from app.llm.types import AskResult
+from app.llm.types import AskResult, read_usage
 from app.llm.usage_tracker import UsageTracker
 from app.models import Provider
 from app.repository import stats as stats_repo
@@ -26,7 +26,7 @@ class LLMUnavailable(Exception):
     """Router 未构建或全部 deployment 调用失败。"""
 
 
-def build_model_list(providers: list[Provider], settings: dict) -> list[dict]:
+def build_model_list(providers: list[Provider]) -> list[dict]:
     """providers → litellm model_list：同组名多 deployment，order=优先级。"""
     model_list = []
     for provider in sorted(providers, key=lambda p: p.priority):
@@ -55,22 +55,19 @@ class RouterManager:
         """按当前 providers+settings 重建 Router；无可用 provider 时置空。"""
         providers = await self._list_enabled()
         settings = await self._settings.get_all()
-        model_list = build_model_list(providers, settings)
-        # litellm 1.100 起 Router 不再接受 callbacks 参数，CustomLogger 走模块级注册
-        litellm.callbacks = (
-            [
-                UsageTracker(
-                    api_base_map={p.base_url: p.id for p in providers},
-                    on_success=self._on_provider_success,
-                    on_failure=self._on_provider_failure,
-                )
-            ]
-            if model_list
-            else []
-        )
+        model_list = build_model_list(providers)
         if not model_list:
+            litellm.callbacks = []
             self._router = None
             return
+        # litellm 1.100 起 Router 不再接受 callbacks 参数，CustomLogger 走模块级注册
+        litellm.callbacks = [
+            UsageTracker(
+                api_base_map={p.base_url: p.id for p in providers},
+                on_success=self._on_provider_success,
+                on_failure=self._on_provider_failure,
+            )
+        ]
         self._router = Router(
             model_list=model_list,
             routing_strategy=settings["routing_strategy"],
@@ -91,12 +88,12 @@ class RouterManager:
             response = await self._router.acompletion(model=MODEL_GROUP, messages=messages)
         except Exception as error:  # litellm 各类异常聚合为摘要
             raise LLMUnavailable(f"{type(error).__name__}: {error}") from error
-        usage = getattr(response, "usage", None)
+        prompt_tokens, completion_tokens = read_usage(response)
         return AskResult(
             content=response["choices"][0]["message"]["content"] or "",
             model=response.get("model", ""),
-            prompt_tokens=getattr(usage, "prompt_tokens", 0) or 0,
-            completion_tokens=getattr(usage, "completion_tokens", 0) or 0,
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
             latency_ms=int((time.monotonic() - start) * 1000),
         )
 
@@ -111,6 +108,7 @@ class RouterManager:
                 messages=TEST_MESSAGES,
                 timeout=TEST_TIMEOUT_SECONDS,
                 temperature=0,
+                metadata={"tiku_test": True},
             )
         except Exception as error:
             return {

@@ -9,9 +9,10 @@ import json
 import logging
 import zipfile
 
-from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from pydantic import BaseModel, ConfigDict, TypeAdapter, ValidationError
 
+from app.api.deps import get_db
 from app.db import Database
 from app.repository import questions, stats
 
@@ -50,30 +51,17 @@ class ImportBody(BaseModel):
 _import_items_adapter = TypeAdapter(list[ImportItem])
 
 
-def _get_db(request: Request) -> Database:
-    return request.app.state.db
-
-
 @router.post("/api/import")
-async def import_items(body: ImportBody, db: Database = Depends(_get_db)) -> dict:
+async def import_items(body: ImportBody, db: Database = Depends(get_db)) -> dict:
     if len(body.items) > MAX_IMPORT_ITEMS:
         raise HTTPException(status_code=400, detail=f"单批最多 {MAX_IMPORT_ITEMS} 条")
     items = [item.model_dump() for item in body.items]
-    try:
-        imported, updated, skipped = await questions.upsert_import(db, items)
-    except Exception:
-        logger.exception("/api/import 导入失败（%d 条）", len(items))
-        raise HTTPException(status_code=500, detail="导入失败") from None
-    try:
-        await stats.log_call(db, kind="import", error=None)
-    except Exception:
-        logger.exception("导入日志写入失败（不影响返回）")
-    return {"code": 1, "imported": imported, "updated": updated, "skipped": skipped}
+    return await _run_import(db, items)
 
 
 @router.post("/api/import/file")
 async def import_file(
-    file: UploadFile = File(...), db: Database = Depends(_get_db)
+    file: UploadFile = File(...), db: Database = Depends(get_db)
 ) -> dict:
     data = await file.read(MAX_UPLOAD_BYTES + 1)
     if len(data) > MAX_UPLOAD_BYTES:
@@ -91,7 +79,11 @@ async def import_file(
         ) from None
     if not items:
         raise HTTPException(status_code=400, detail="文件中没有可导入的条目")
+    return await _run_import(db, items)
 
+
+async def _run_import(db: Database, items: list[dict]) -> dict:
+    """分批 upsert + 导入日志；批间无事务边界，单批失败整体 500（与现状一致）。"""
     imported = updated = skipped = 0
     try:
         for start in range(0, len(items), MAX_IMPORT_ITEMS):
@@ -103,7 +95,7 @@ async def import_file(
                 skipped + delta[2],
             )
     except Exception:
-        logger.exception("/api/import/file 导入失败（%d 条）", len(items))
+        logger.exception("导入失败（%d 条）", len(items))
         raise HTTPException(status_code=500, detail="导入失败") from None
     try:
         await stats.log_call(db, kind="import", error=None)

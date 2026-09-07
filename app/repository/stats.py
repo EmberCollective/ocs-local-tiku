@@ -18,17 +18,6 @@ DAILY_FIELDS = (
 )
 PROVIDER_FIELDS = ("calls", "failures", "prompt_tokens", "completion_tokens")
 
-_CALL_LOG_OPTIONAL_COLUMNS = (
-    "cache_key",
-    "question",
-    "provider_id",
-    "model",
-    "latency_ms",
-    "prompt_tokens",
-    "completion_tokens",
-    "error",
-)
-
 
 def today() -> str:
     """本地时区 YYYY-MM-DD（stats_daily 分桶键）。"""

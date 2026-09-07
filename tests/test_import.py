@@ -104,17 +104,17 @@ async def test_upsert_import_skips_illegal_options_types(db):
 
 async def test_upsert_import_row_db_error_counts_skipped(db, monkeypatch):
     """单行 DB 异常只跳过该行，不中断整批（事务内继续）。"""
-    original_get = questions.get_by_key
+    original_insert = db.insert
     has_failed = False
 
-    async def flaky_get(database, cache_key):
+    async def flaky_insert(sql: str, params: tuple = ()):
         nonlocal has_failed
-        if not has_failed:
+        if not has_failed and sql.strip().startswith("INSERT INTO questions"):
             has_failed = True
             raise sqlite3.OperationalError("database is locked")
-        return await original_get(database, cache_key)
+        return await original_insert(sql, params)
 
-    monkeypatch.setattr(questions, "get_by_key", flaky_get)
+    monkeypatch.setattr(db, "insert", flaky_insert)
     imported, _, skipped = await questions.upsert_import(db, [_item(), _item(question="第二题")])
     assert (imported, skipped) == (1, 1)
 

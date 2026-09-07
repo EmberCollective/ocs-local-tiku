@@ -23,14 +23,8 @@ WHERE cache_key = ?
 """
 
 
-async def get_by_key(db: Database, cache_key: str) -> QuestionRecord | None:
-    row = await db.query_one("SELECT * FROM questions WHERE cache_key = ?", (cache_key,))
-    return _to_record(row) if row is not None else None
-
-
-async def insert_question(db: Database, record: NewQuestion) -> bool:
-    """写入缓存；唯一约束天然去重。哈希已存在时比对规范化原文，不一致记碰撞日志。"""
-    params = (
+def _insert_params(record: NewQuestion) -> tuple:
+    return (
         record.cache_key,
         record.question,
         record.qtype,
@@ -38,8 +32,17 @@ async def insert_question(db: Database, record: NewQuestion) -> bool:
         record.answer,
         record.source,
     )
+
+
+async def get_by_key(db: Database, cache_key: str) -> QuestionRecord | None:
+    row = await db.query_one("SELECT * FROM questions WHERE cache_key = ?", (cache_key,))
+    return _to_record(row) if row is not None else None
+
+
+async def insert_question(db: Database, record: NewQuestion) -> bool:
+    """写入缓存；唯一约束天然去重。哈希已存在时比对规范化原文，不一致记碰撞日志。"""
     try:
-        return await db.insert(_INSERT_SQL, params) is not None
+        return await db.insert(_INSERT_SQL, _insert_params(record)) is not None
     except sqlite3.IntegrityError:
         await _log_collision(db, record)
         return False
@@ -92,16 +95,14 @@ async def upsert_import(db: Database, items: Sequence[object]) -> tuple[int, int
                 skipped += 1
                 continue
             try:
-                if await get_by_key(db, record.cache_key) is not None:
-                    await _apply_import_update(db, record)
-                    updated += 1
-                else:
-                    await db.insert(
-                        _INSERT_SQL,
-                        (record.cache_key, record.question, record.qtype,
-                         _dump_options(record.options), record.answer, record.source),
-                    )
+                inserted = await db.insert(_INSERT_SQL, _insert_params(record))
+                if inserted is not None:
                     imported += 1
+                else:
+                    skipped += 1  # 理论不可达，防御
+            except sqlite3.IntegrityError:
+                await _apply_import_update(db, record)
+                updated += 1
             except Exception as error:
                 skipped += 1
                 logger.warning("导入行失败（跳过）：%r — %s", item, error)

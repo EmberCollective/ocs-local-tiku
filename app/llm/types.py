@@ -1,4 +1,4 @@
-"""LLM 层公共类型：AskResult 与最小协议（测试替身注入点）。
+"""LLM 层公共类型：AskResult、read_usage 与最小协议（测试替身注入点）。
 
 AnswerService 只依赖「有 ask(messages) -> AskResult 的对象」，
 litellm 只在 RouterManager 内部出现（design §8）。
@@ -18,6 +18,15 @@ class AskResult:
     prompt_tokens: int = 0
     completion_tokens: int = 0
     latency_ms: int = 0
+
+
+def read_usage(response: object) -> tuple[int, int]:
+    """从 litellm 响应对象安全提取 (prompt_tokens, completion_tokens)，缺失记 0。"""
+    usage = getattr(response, "usage", None)
+    return (
+        getattr(usage, "prompt_tokens", 0) or 0,
+        getattr(usage, "completion_tokens", 0) or 0,
+    )
 
 
 class LLMProtocol(Protocol):

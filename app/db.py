@@ -38,7 +38,6 @@ CREATE TABLE questions (
   hits         INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX idx_questions_last_hit ON questions(last_hit_at);
-CREATE INDEX idx_questions_created  ON questions(created_at);
 
 CREATE TABLE providers (
   id           TEXT PRIMARY KEY,
@@ -95,8 +94,10 @@ CREATE TABLE call_log (
 CREATE INDEX idx_call_log_ts ON call_log(ts);
 """
 
+SCHEMA_V2 = "DROP INDEX IF EXISTS idx_questions_created;"
+
 # 版本号 → 该版本要执行的 DDL；新增版本只追加条目
-MIGRATIONS: dict[int, str] = {1: SCHEMA_V1}
+MIGRATIONS: dict[int, str] = {1: SCHEMA_V1, 2: SCHEMA_V2}
 
 
 class Database:

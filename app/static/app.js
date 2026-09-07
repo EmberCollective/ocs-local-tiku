@@ -28,15 +28,10 @@ const NOTICE_TIMEOUT_MS = 4000;
 const TOKEN_STORAGE_KEY = 'tiku_token';
 const TRUNCATE_LENGTH = 40;
 
-const NUMERIC_SETTING_KEYS = [
-  'ttl_days',
-  'cleanup_batch_size',
-  'cleanup_interval_hours',
-  'llm_timeout',
-  'num_retries',
-  'allowed_fails',
-  'cooldown_time',
-];
+// 数值型设置键 = 设置表单键去掉两个非数值键（blankSettingsForm 为函数声明，可提升）
+const NUMERIC_SETTING_KEYS = Object.keys(blankSettingsForm()).filter(
+  (key) => key !== 'routing_strategy' && key !== 'api_token',
+);
 
 const OCS_CONFIG = [
   {
@@ -58,6 +53,13 @@ const KIND_LABELS = {
   import: '导入',
 };
 
+const BADGE_CLASSES = {
+  hit: 'badge badge-hit',
+  miss: 'badge badge-miss',
+  'llm-fail': 'badge badge-fail',
+  'parse-fail': 'badge badge-fail',
+};
+
 const QTYPE_LABELS = { single: '单选', multiple: '多选', judgement: '判断', completion: '填空' };
 
 /** 宽容数字：任何非有限值归零，避免 NaN 渗入模板。 */
@@ -66,60 +68,34 @@ function num(value) {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
-/** 列表载荷归一：兼容裸数组或 {items|list|data: [...]} 包装。 */
+/** 列表载荷解包：后端列表端点统一 {items: [...]}。 */
 function asArray(payload) {
-  if (Array.isArray(payload)) return payload;
-  if (!payload || typeof payload !== 'object') return [];
-  const list = payload.items || payload.list || payload.data;
-  return Array.isArray(list) ? list : [];
+  return Array.isArray(payload?.items) ? payload.items : [];
 }
 
-/** /api/stats 响应归一：适配实际契约 {today, total, daily}，容忍字段别名。 */
+/** /api/stats 响应 → 模板形态（后端契约固定：{today, total, daily}）。 */
 function normalizeStats(raw) {
   const source = raw || {};
   const today = source.today || {};
-  const all =
-    source.total_stats ||
-    source.cumulative ||
-    (source.total && typeof source.total === 'object' ? source.total : {});
-  const days = asArray(source.daily || source.days || source.series).map((day) => ({
-    day: String(day.day || day.date || ''),
-    hits: num(day.cache_hits ?? day.hits),
-    misses: num(day.cache_misses ?? day.misses),
+  const total = source.total || {};
+  const days = asArray(source.daily).map((day) => ({
+    day: String(day.day || ''),
+    hits: num(day.cache_hits),
+    misses: num(day.cache_misses),
   }));
   return {
-    totalQuestions: num(all.questions ?? source.total_questions),
-    todayHits: num(today.cache_hits ?? today.hits),
-    todayMisses: num(today.cache_misses ?? today.misses),
+    totalQuestions: num(total.questions),
+    todayHits: num(today.cache_hits),
+    todayMisses: num(today.cache_misses),
     todayLlmCalls: num(today.llm_calls),
     todayFailures: num(today.llm_failures),
-    totalHits: num(all.cache_hits),
-    totalLlmCalls: num(all.llm_calls),
-    totalPromptTokens: num(all.prompt_tokens),
-    totalCompletionTokens: num(all.completion_tokens),
     days,
   };
 }
 
-/** provider 行归一：SQLite 的 0/1 布尔与可空数值转成模板友好的形态。 */
+/** provider 行归一：可空数值转空串（表单展示）。 */
 function normalizeProvider(provider) {
-  return {
-    ...provider,
-    priority: num(provider.priority ?? 1),
-    enabled: provider.enabled === 1 || provider.enabled === true,
-    rpm: provider.rpm ?? '',
-    max_parallel: provider.max_parallel ?? '',
-  };
-}
-
-/** 缓存行归一：时间戳与计数确保是数字。 */
-function normalizeCacheItem(item) {
-  return {
-    ...item,
-    hits: num(item.hits),
-    created_at: num(item.created_at),
-    last_hit_at: num(item.last_hit_at),
-  };
+  return { ...provider, rpm: provider.rpm ?? '', max_parallel: provider.max_parallel ?? '' };
 }
 
 /** 不可变交换列表两个下标（用于优先级上移/下移）。 */
@@ -210,7 +186,6 @@ function tikuApp() {
     selectedIds: [],
 
     settingsForm: blankSettingsForm(),
-    settingsLoaded: false,
     settingsBusy: false,
 
     // ---------- 生命周期 ----------
@@ -292,7 +267,7 @@ function tikuApp() {
           this.api('/api/log?limit=' + LOG_LIMIT),
         ]);
         this.stats = normalizeStats(stats);
-        this.logItems = asArray(logs).map((item) => ({ ...item, ts: num(item.ts) }));
+        this.logItems = asArray(logs);
       });
     },
 
@@ -341,8 +316,8 @@ function tikuApp() {
       this.providerModalOpen = false;
     },
 
-    /** 组装 provider 提交体：可选字段空串归 null，enabled 透传。 */
-    buildProviderBody(fields, enabled) {
+    /** 组装 provider 提交体：可选字段空串归 null。 */
+    buildProviderBody(fields) {
       const optional = (value) => (value === '' || value === null || value === undefined ? null : num(value));
       return {
         name: String(fields.name || '').trim(),
@@ -351,7 +326,6 @@ function tikuApp() {
         api_key: String(fields.api_key || '').trim(),
         rpm: optional(fields.rpm),
         max_parallel: optional(fields.max_parallel),
-        enabled,
       };
     },
 
@@ -362,8 +336,7 @@ function tikuApp() {
         this.setError('名称、Base URL、模型均为必填项');
         return;
       }
-      const enabled = editing ? editing.enabled : true;
-      const body = this.buildProviderBody(form, enabled);
+      const body = this.buildProviderBody(form);
       await this.run(async () => {
         if (editing) {
           await this.api('/api/providers/' + editing.id, { method: 'PUT', body });
@@ -378,10 +351,7 @@ function tikuApp() {
     async toggleProvider(provider) {
       const next = !provider.enabled;
       await this.run(async () => {
-        await this.api('/api/providers/' + provider.id + '/enabled', {
-          method: 'PUT',
-          body: { enabled: next },
-        });
+        await this.api('/api/providers/' + provider.id, { method: 'PUT', body: { enabled: next } });
         await this.loadProviders();
       }, next ? '已启用「' + provider.name + '」' : '已停用「' + provider.name + '」');
     },
@@ -429,7 +399,7 @@ function tikuApp() {
         if (this.cacheType) params.set('type', this.cacheType);
         const payload = await this.api('/api/cache?' + params.toString());
         const items = asArray(payload);
-        this.cacheItems = items.map(normalizeCacheItem);
+        this.cacheItems = items;
         this.cacheTotal = num(payload?.total ?? items.length);
         this.pruneSelection();
       } catch (err) {
@@ -553,7 +523,6 @@ function tikuApp() {
           if (data[key] !== undefined && data[key] !== null) form[key] = data[key];
         }
         this.settingsForm = form;
-        this.settingsLoaded = true;
       });
     },
 
@@ -589,10 +558,7 @@ function tikuApp() {
     },
 
     badgeClass(kind) {
-      if (kind === 'hit') return 'badge badge-hit';
-      if (kind === 'miss') return 'badge badge-miss';
-      if (kind === 'llm-fail' || kind === 'parse-fail') return 'badge badge-fail';
-      return 'badge badge-import';
+      return BADGE_CLASSES[kind] || 'badge badge-import';
     },
 
     qtypeLabel(qtype) {

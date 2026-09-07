@@ -178,9 +178,9 @@ class TestSettingsApi:
         assert values["ttl_days"] == 30
         assert values["cleanup_batch_size"] == 100
 
-    async def test_put_ignores_unknown_keys(self, client):
+    async def test_put_unknown_keys_rejected_422(self, client):
         resp = await client.put("/api/settings", json={"not_a_setting": 1})
-        assert resp.status_code == 200
+        assert resp.status_code == 422
         assert (await client.get("/api/settings")).json() == dict(DEFAULTS)
 
     async def test_put_invalid_value_422(self, client):
@@ -265,12 +265,3 @@ async def test_all_admin_endpoints_require_token(client, method, path):
     resp = await client.request(method, path, json={})
     assert resp.status_code == 401
     assert resp.json() == {"detail": "unauthorized"}
-
-
-async def test_build_llm_falls_back_without_manager(monkeypatch):
-    """非 FAKE 且 RouterManager 缺失时的兜底占位（防御分支）。"""
-    from app.llm.fake import UnconfiguredLLM
-    from app.main import _build_llm
-
-    monkeypatch.delenv("TIKU_FAKE_LLM", raising=False)
-    assert isinstance(_build_llm(None), UnconfiguredLLM)

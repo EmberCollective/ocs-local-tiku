@@ -59,7 +59,7 @@ class FakeResponse(dict):
 class TestBuildModelList:
     def test_sorts_by_priority_and_maps_fields(self):
         providers = [make_provider(pid="p2", priority=2), make_provider(pid="p1", priority=1)]
-        model_list = build_model_list(providers, dict(DEFAULTS))
+        model_list = build_model_list(providers)
         assert [m["litellm_params"]["order"] for m in model_list] == [1, 2]
         assert model_list[0]["model_name"] == "answering"
         assert model_list[0]["litellm_params"]["model"] == "openai/test-model"
@@ -67,18 +67,18 @@ class TestBuildModelList:
         assert model_list[0]["litellm_params"]["api_key"] == "sk-x"
 
     def test_conditional_params(self):
-        with_limits = build_model_list(
-            [make_provider(rpm=60, max_parallel=4)], dict(DEFAULTS)
-        )[0]["litellm_params"]
+        with_limits = build_model_list([make_provider(rpm=60, max_parallel=4)])[0][
+            "litellm_params"
+        ]
         assert with_limits["rpm"] == 60
         assert with_limits["max_parallel_requests"] == 4
 
-        without = build_model_list([make_provider()], dict(DEFAULTS))[0]["litellm_params"]
+        without = build_model_list([make_provider()])[0]["litellm_params"]
         assert "rpm" not in without
         assert "max_parallel_requests" not in without
 
     def test_empty_providers_returns_empty(self):
-        assert build_model_list([], dict(DEFAULTS)) == []
+        assert build_model_list([]) == []
 
 
 class TestRouterManager:
@@ -232,6 +232,40 @@ class TestUsageTracker:
             end_time=None,
         )
         assert events == []
+
+    async def test_test_call_marker_skips_stats(self):
+        """带 tiku_test 标记的直连冒烟不触发统计回调。"""
+        events = []
+
+        async def on_success(provider_id, prompt_tokens, completion_tokens):
+            events.append(("ok", provider_id, prompt_tokens, completion_tokens))
+
+        async def on_failure(provider_id):
+            events.append(("fail", provider_id))
+
+        tracker = UsageTracker(
+            api_base_map={"https://api.x.com/v1": "p1"},
+            on_success=on_success,
+            on_failure=on_failure,
+        )
+        marked_kwargs = {
+            "litellm_params": {"api_base": "https://api.x.com/v1"},
+            "metadata": {"tiku_test": True},
+        }
+        await tracker.async_log_success_event(
+            kwargs=marked_kwargs, response_obj=FakeResponse(), start_time=None, end_time=None
+        )
+        await tracker.async_log_failure_event(
+            kwargs=marked_kwargs, response_obj=None, start_time=None, end_time=None
+        )
+        assert events == []
+        await tracker.async_log_success_event(
+            kwargs={"litellm_params": {"api_base": "https://api.x.com/v1"}},
+            response_obj=FakeResponse(),
+            start_time=None,
+            end_time=None,
+        )
+        assert events == [("ok", "p1", 11, 7)]
 
 
 @pytest.mark.live

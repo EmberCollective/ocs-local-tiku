@@ -23,7 +23,7 @@ from app.api import (
 from app.api.deps import require_token
 from app.cleanup import cleanup_loop
 from app.db import Database
-from app.llm.fake import EchoLLM, UnconfiguredLLM
+from app.llm.fake import EchoLLM
 from app.llm.types import LLMProtocol
 from app.repository import providers as providers_repo
 from app.repository.settings import SettingsRepo
@@ -94,8 +94,6 @@ def _build_llm(router_manager) -> LLMProtocol:
     """FAKE 模式用 EchoLLM；生产路径用 RouterManager（无 provider 时 ask 报未配置）。"""
     if config.fake_llm_enabled():
         return EchoLLM()
-    if router_manager is None:
-        return UnconfiguredLLM()
     return router_manager
 
 

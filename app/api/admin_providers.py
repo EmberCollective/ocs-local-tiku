@@ -3,17 +3,17 @@
 api_key 仅内部使用，序列化一律打码（mask_key）；写操作成功后热重建 Router。
 """
 
+import asyncio
 import time
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.api.deps import get_db, rebuild_router
+from app.api.deps import get_db, get_router_manager, rebuild_router
 from app.db import Database
 from app.models import Provider
 from app.repository import providers as providers_repo
 from app.repository import stats as stats_repo
-from app.repository.providers import mask_key
 
 router = APIRouter()
 
@@ -22,9 +22,9 @@ STATUS_WINDOW_SECONDS = 86400
 
 
 class ProviderCreate(BaseModel):
-    """新增 provider 请求体。"""
+    """新增 provider 请求体（未知字段 422，契约错位显性化）。"""
 
-    model_config = ConfigDict(extra="ignore")
+    model_config = ConfigDict(extra="forbid")
 
     name: str = Field(min_length=1)
     base_url: str = Field(min_length=1)
@@ -35,9 +35,9 @@ class ProviderCreate(BaseModel):
 
 
 class ProviderUpdate(BaseModel):
-    """部分更新请求体：缺省字段不改；api_key 留空 = 不修改。"""
+    """部分更新请求体：缺省字段不改；api_key 留空 = 不修改；未知字段 422。"""
 
-    model_config = ConfigDict(extra="ignore")
+    model_config = ConfigDict(extra="forbid")
 
     name: str | None = Field(default=None, min_length=1)
     base_url: str | None = Field(default=None, min_length=1)
@@ -45,18 +45,13 @@ class ProviderUpdate(BaseModel):
     model: str | None = Field(default=None, min_length=1)
     rpm: int | None = None
     max_parallel: int | None = None
+    enabled: bool | None = None
 
 
 class ReorderBody(BaseModel):
     """按序重排请求体：列表顺序 = 优先级。"""
 
     ids: list[str]
-
-
-class EnabledBody(BaseModel):
-    """启停请求体。"""
-
-    enabled: bool
 
 
 @router.get("/api/providers")
@@ -76,10 +71,11 @@ async def create_provider(
 @router.get("/api/providers/status")
 async def providers_status(request: Request, db: Database = Depends(get_db)) -> dict:
     """近 24h 各 provider 调用/失败/token、成功率、平均延迟、冷却标记。"""
-    all_providers = await providers_repo.list_providers(db)
-    counters = await stats_repo.provider_stats_since(db, stats_repo.days_ago(1))
-    latencies = await stats_repo.avg_latency_since(
-        db, int(time.time()) - STATUS_WINDOW_SECONDS
+    # 三个独立读并发（aiosqlite 单连接由内部队列串行落地）；冷却查询同步 best-effort，随其后
+    all_providers, counters, latencies = await asyncio.gather(
+        providers_repo.list_providers(db),
+        stats_repo.provider_stats_since(db, stats_repo.days_ago(1)),
+        stats_repo.avg_latency_since(db, int(time.time()) - STATUS_WINDOW_SECONDS),
     )
     cooldown_entries = _cooldown_entries(request)
     items = [
@@ -109,27 +105,10 @@ async def update_provider(
     request: Request,
     db: Database = Depends(get_db),
 ) -> dict:
-    if await providers_repo.get_provider(db, provider_id) is None:
-        raise HTTPException(status_code=404, detail="provider 不存在")
+    await _get_or_404(db, provider_id)
     await providers_repo.update_provider(db, provider_id, body.model_dump(exclude_unset=True))
     await rebuild_router(request)
-    updated = await providers_repo.get_provider(db, provider_id)
-    return _serialize(updated)
-
-
-@router.put("/api/providers/{provider_id}/enabled")
-async def set_provider_enabled(
-    provider_id: str,
-    body: EnabledBody,
-    request: Request,
-    db: Database = Depends(get_db),
-) -> dict:
-    """启停专用端点（enabled 不在通用更新字段内）。"""
-    if await providers_repo.get_provider(db, provider_id) is None:
-        raise HTTPException(status_code=404, detail="provider 不存在")
-    await providers_repo.set_enabled(db, provider_id, body.enabled)
-    await rebuild_router(request)
-    updated = await providers_repo.get_provider(db, provider_id)
+    updated = await _get_or_404(db, provider_id)
     return _serialize(updated)
 
 
@@ -146,13 +125,18 @@ async def delete_provider(
 @router.post("/api/providers/{provider_id}/test")
 async def test_provider(provider_id: str, request: Request, db: Database = Depends(get_db)) -> dict:
     """直连单 provider 冒烟（不走 Router，10s 超时）。"""
-    provider = await providers_repo.get_provider(db, provider_id)
-    if provider is None:
-        raise HTTPException(status_code=404, detail="provider 不存在")
-    manager = getattr(request.app.state, "router_manager", None)
+    provider = await _get_or_404(db, provider_id)
+    manager = get_router_manager(request)
     if manager is None:
         return {"ok": False, "latency_ms": 0, "reply": None, "error": "Router 未初始化"}
     return await manager.test_provider(provider)
+
+
+async def _get_or_404(db: Database, provider_id: str) -> Provider:
+    provider = await providers_repo.get_provider(db, provider_id)
+    if provider is None:
+        raise HTTPException(status_code=404, detail="provider 不存在")
+    return provider
 
 
 def _serialize(provider: Provider) -> dict:
@@ -160,7 +144,7 @@ def _serialize(provider: Provider) -> dict:
         "id": provider.id,
         "name": provider.name,
         "base_url": provider.base_url,
-        "api_key": mask_key(provider.api_key),
+        "api_key": providers_repo.mask_key(provider.api_key),
         "model": provider.model,
         "priority": provider.priority,
         "rpm": provider.rpm,
@@ -195,7 +179,7 @@ def _status_dict(
 
 def _cooldown_entries(request: Request) -> list[str]:
     """Router 冷却标记（best-effort：Manager 缺失或异常均返回空）。"""
-    manager = getattr(request.app.state, "router_manager", None)
+    manager = get_router_manager(request)
     if manager is None:
         return []
     try:

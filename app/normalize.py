@@ -46,9 +46,7 @@ def strip_option_prefix(option: str) -> str:
 
 def option_key(option: str) -> str:
     """选项匹配键：先 NFKC 归一（全角前缀折叠为 ASCII）再剥字母前缀，再归一尾标点。"""
-    normalized = normalize_text(option)
-    stripped = OPTION_PREFIX_RE.sub("", normalized, count=1)
-    return normalize_text(stripped)
+    return normalize_text(strip_option_prefix(normalize_text(option)))
 
 
 def split_options(raw: str | None) -> list[str]:

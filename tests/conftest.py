@@ -47,7 +47,6 @@ EXPECTED_TABLES = {
 }
 EXPECTED_INDEXES = {
     "idx_questions_last_hit",
-    "idx_questions_created",
     "idx_call_log_ts",
 }
 
@@ -79,7 +78,7 @@ async def client(data_dir, monkeypatch):
 
 @pytest.fixture
 async def plain_client(data_dir):
-    """未启用 FakeLLM 的客户端（默认 UnconfiguredLLM 路径）。"""
+    """未启用 FakeLLM 的客户端（真实 RouterManager 路径，无 provider 时 ask 报未配置）。"""
     async with _open_client(create_app()) as http_client:
         yield http_client
 

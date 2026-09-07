@@ -8,8 +8,6 @@ import pytest
 
 from app.api.import_api import ImportFileError, extract_import_items
 
-pytestmark = pytest.mark.asyncio
-
 
 def _item(question="题目", answer="甲") -> dict:
     return {"question": question, "type": "single", "options": "A. 甲\nB. 乙", "answer": answer}

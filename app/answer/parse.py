@@ -67,19 +67,9 @@ def content_to_response(content: str, qtype: str, options: list[str]) -> str:
     """「答案内容」→ 响应形态：选项题映射字母（按当前选项顺序），其余原样。"""
     if qtype in NO_OPTION_QTYPES:
         return content
-    letters: list[str] = []
-    unmatched: list[str] = []
-    for piece in _split_pieces(content, qtype):
-        found = _match_piece(piece, options)
-        if found:
-            for option in found:
-                letter = chr(ord("A") + options.index(option))
-                if letter not in letters:
-                    letters.append(letter)
-        elif piece.strip():
-            unmatched.append(piece.strip())
-    ordered_letters = sorted(letters, key=lambda letter: options.index(options[ord(letter) - ord("A")]))
-    return "#".join(ordered_letters + unmatched)
+    ordered, unmatched = _match_pieces(content, qtype, options)
+    letters = list(dict.fromkeys(chr(ord("A") + options.index(option)) for option in ordered))
+    return "#".join(letters + unmatched)
 
 
 def strip_wrappers(raw: str) -> str:
@@ -140,8 +130,8 @@ def _match_piece(piece: str, options: list[str]) -> list[str]:
     return []
 
 
-def _match_options(text: str, qtype: str, options: list[str]) -> str:
-    """选项题回复 → 内容形态：匹配选项按选项表顺序 # 拼接，未匹配片段保留原文。"""
+def _match_pieces(text: str, qtype: str, options: list[str]) -> tuple[list[str], list[str]]:
+    """按片段匹配选项：返回（按选项表顺序去重后的匹配选项，未匹配的非空片段）。"""
     matched: list[str] = []
     unmatched: list[str] = []
     for piece in _split_pieces(text, qtype):
@@ -151,4 +141,10 @@ def _match_options(text: str, qtype: str, options: list[str]) -> str:
         elif piece.strip():
             unmatched.append(piece.strip())
     ordered = [option for option in options if option in matched]
+    return ordered, unmatched
+
+
+def _match_options(text: str, qtype: str, options: list[str]) -> str:
+    """选项题回复 → 内容形态：匹配选项按选项表顺序 # 拼接，未匹配片段保留原文。"""
+    ordered, unmatched = _match_pieces(text, qtype, options)
     return "#".join(ordered + unmatched)

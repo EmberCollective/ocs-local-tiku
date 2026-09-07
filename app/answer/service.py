@@ -14,7 +14,7 @@ from dataclasses import dataclass
 from app.answer.parse import ParseError, content_to_response, parse_llm_reply
 from app.answer.prompt import build_messages
 from app.db import Database
-from app.llm.types import LLMProtocol
+from app.llm.types import AskResult, LLMProtocol
 from app.models import NewQuestion
 from app.normalize import build_cache_key, canonical_qtype, split_options
 from app.repository import questions, stats
@@ -63,9 +63,11 @@ class AnswerService:
     ) -> QueryOutcome:
         day = stats.today()
         try:
-            await stats.bump_daily(self._db, day, cache_hits=1)
-            await stats.log_call(self._db, kind="hit", cache_key=key, question=title)
-            await questions.touch(self._db, key)
+            await asyncio.gather(
+                stats.bump_daily(self._db, day, cache_hits=1),
+                stats.log_call(self._db, kind="hit", cache_key=key, question=title),
+                questions.touch(self._db, key),
+            )
         except Exception:
             logger.exception("命中路径统计/更新失败（不影响返回）cache_key=%s", key)
         return QueryOutcome(
@@ -83,9 +85,11 @@ class AnswerService:
         try:
             result = await self._llm.ask(messages)
         except Exception as error:
-            await stats.bump_daily(self._db, day, llm_calls=1, llm_failures=1)
-            await stats.log_call(
-                self._db, kind="llm-fail", cache_key=key, question=title, error=str(error)
+            await asyncio.gather(
+                stats.bump_daily(self._db, day, llm_calls=1, llm_failures=1),
+                stats.log_call(
+                    self._db, kind="llm-fail", cache_key=key, question=title, error=str(error)
+                ),
             )
             logger.warning("LLM 调用失败 cache_key=%s: %s", key, error)
             return QueryOutcome(
@@ -96,26 +100,20 @@ class AnswerService:
         try:
             content = parse_llm_reply(result.content, qtype, options)
         except ParseError as error:
-            await stats.bump_daily(self._db, day, llm_calls=1)
-            await stats.log_call(
-                self._db, kind="parse-fail", cache_key=key, question=title,
-                provider_id=result.provider_id, model=result.model,
-                latency_ms=result.latency_ms, prompt_tokens=result.prompt_tokens,
-                completion_tokens=result.completion_tokens, error=str(error),
+            await asyncio.gather(
+                stats.bump_daily(self._db, day, llm_calls=1),
+                self._log_llm_call("parse-fail", key, title, result, error=str(error)),
             )
             return QueryOutcome(
                 ok=False, kind="parse-fail", question=title, answer="", msg="答案解析失败",
             )
 
-        await stats.bump_daily(
-            self._db, day, llm_calls=1,
-            prompt_tokens=result.prompt_tokens, completion_tokens=result.completion_tokens,
-        )
-        await stats.log_call(
-            self._db, kind="miss", cache_key=key, question=title,
-            provider_id=result.provider_id, model=result.model,
-            latency_ms=result.latency_ms, prompt_tokens=result.prompt_tokens,
-            completion_tokens=result.completion_tokens,
+        await asyncio.gather(
+            stats.bump_daily(
+                self._db, day, llm_calls=1,
+                prompt_tokens=result.prompt_tokens, completion_tokens=result.completion_tokens,
+            ),
+            self._log_llm_call("miss", key, title, result),
         )
         try:
             await questions.insert_question(
@@ -131,4 +129,15 @@ class AnswerService:
         return QueryOutcome(
             ok=True, kind="miss", question=title,
             answer=content_to_response(content, qtype, options),
+        )
+
+    async def _log_llm_call(
+        self, kind: str, key: str, title: str, result: AskResult, error: str | None = None
+    ) -> None:
+        """写一条携带 result 派生字段的调用日志（error=None 落库 NULL）。"""
+        await stats.log_call(
+            self._db, kind=kind, cache_key=key, question=title, error=error,
+            provider_id=result.provider_id, model=result.model,
+            latency_ms=result.latency_ms, prompt_tokens=result.prompt_tokens,
+            completion_tokens=result.completion_tokens,
         )

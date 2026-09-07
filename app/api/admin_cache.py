@@ -1,5 +1,6 @@
 """管理 API：缓存分页/搜索/删除/导出 + 统计摘要（design §7）。"""
 
+import asyncio
 import json
 from datetime import datetime
 
@@ -79,13 +80,16 @@ async def delete_cache_batch(body: DeleteBatchBody, db: Database = Depends(get_d
 async def get_stats(db: Database = Depends(get_db)) -> dict:
     """今日 + 累计 + 近 14 天序列；空档日期补零。"""
     days = [stats_repo.days_ago(offset) for offset in range(DAILY_SERIES_DAYS - 1, -1, -1)]
-    rows = await stats_repo.daily_between(db, days[0], days[-1])
+    rows, totals, total_questions = await asyncio.gather(
+        stats_repo.daily_between(db, days[0], days[-1]),
+        stats_repo.daily_totals(db),
+        questions_repo.count_all(db),
+    )
     by_day = {row["day"]: dict(row) for row in rows}
     daily = [by_day.get(day, _empty_day(day)) for day in days]
-    totals = await stats_repo.daily_totals(db)
     return {
         "today": daily[-1],
-        "total": {**totals, "questions": await questions_repo.count_all(db)},
+        "total": {**totals, "questions": total_questions},
         "daily": daily,
     }
 

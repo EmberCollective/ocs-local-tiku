@@ -14,13 +14,13 @@ async def test_migrate_creates_all_tables_and_indexes(db):
 
 async def test_migrate_sets_user_version(db):
     row = await db.query_one("PRAGMA user_version")
-    assert row["user_version"] == 1
+    assert row["user_version"] == 2
 
 
 async def test_connect_is_idempotent_same_instance(db):
     await db.connect()  # 已连接时直接返回，不重复迁移
     row = await db.query_one("PRAGMA user_version")
-    assert row["user_version"] == 1
+    assert row["user_version"] == 2
 
 
 async def test_reopen_existing_db_skips_migration(data_dir):

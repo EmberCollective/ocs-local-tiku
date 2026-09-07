@@ -28,13 +28,6 @@ class EchoLLM:
         )
 
 
-class UnconfiguredLLM:
-    """未配置任何 provider 时的占位：ask 必失败，message 进入 code=0 提示。"""
-
-    async def ask(self, messages: list[dict]) -> AskResult:
-        raise RuntimeError("未配置 LLM provider")
-
-
 def _echo_answer(user_content: str) -> str:
     lines = user_content.split("\n")
     if any("判断题" in line for line in lines if line.startswith(_QTYPE_MARKER)):

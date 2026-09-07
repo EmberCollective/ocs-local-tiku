@@ -1,6 +1,6 @@
 """领域模型：frozen dataclass，字段与 questions 表对应。"""
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 
 @dataclass(frozen=True)

@@ -6,8 +6,8 @@ import uuid
 from app.db import Database
 from app.models import Provider
 
-# update_provider 允许修改的字段（priority 只能通过 reorder 变更）
-UPDATABLE_FIELDS = ("name", "base_url", "api_key", "model", "rpm", "max_parallel")
+# update_provider 允许修改的字段（priority 只能通过 reorder 变更；enabled 走通用更新）
+UPDATABLE_FIELDS = ("name", "base_url", "api_key", "model", "rpm", "max_parallel", "enabled")
 
 
 async def create_provider(db: Database, payload: dict) -> Provider:
@@ -84,6 +84,7 @@ async def reorder(db: Database, ids: list[str]) -> None:
 
 
 async def set_enabled(db: Database, provider_id: str, enabled: bool) -> None:
+    """专用启停写入；API 层已并入通用更新，保留供仓储层直用（tests 直接调用）。"""
     await db.execute(
         "UPDATE providers SET enabled = ?, updated_at = ? WHERE id = ?",
         (1 if enabled else 0, int(time.time()), provider_id),

@@ -30,11 +30,19 @@ async def require_token(request: Request) -> None:
         raise HTTPException(status_code=401, detail="unauthorized")
 
 
+def get_router_manager(request: Request):
+    """app.state.router_manager 访问器（FAKE 模式下为 None）。
+
+    返回类型不标注：RouterManager 延迟导入（避免 FAKE/单测加载 litellm）。
+    """
+    return getattr(request.app.state, "router_manager", None)
+
+
 async def rebuild_router(request: Request) -> None:
     """providers/settings 写操作成功后热重建 Router。
 
     FAKE_LLM 模式下不创建 RouterManager，此处跳过。
     """
-    manager = getattr(request.app.state, "router_manager", None)
+    manager = get_router_manager(request)
     if manager is not None:
         await manager.rebuild()
