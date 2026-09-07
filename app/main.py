@@ -1,11 +1,14 @@
-"""应用工厂：lifespan + CORS + 路由挂载。"""
+"""应用工厂：lifespan + CORS + 路由挂载 + 静态面板。"""
 
 import asyncio
 import logging
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 
 from app import config
 from app.answer.service import AnswerService
@@ -26,6 +29,8 @@ from app.repository import providers as providers_repo
 from app.repository.settings import SettingsRepo
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
+
+STATIC_DIR = Path(__file__).parent / "static"
 
 
 def create_app() -> FastAPI:
@@ -60,6 +65,13 @@ def create_app() -> FastAPI:
     app.include_router(admin_cache.router, dependencies=[Depends(require_token)])
     app.include_router(admin_settings.router, dependencies=[Depends(require_token)])
     app.include_router(import_api.router)
+
+    @app.get("/", include_in_schema=False)
+    async def serve_panel() -> FileResponse:
+        """Web 管理面板入口页。"""
+        return FileResponse(STATIC_DIR / "index.html")
+
+    app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
     return app
 
 
