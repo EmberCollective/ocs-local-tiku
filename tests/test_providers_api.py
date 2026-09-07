@@ -194,6 +194,21 @@ class TestProvidersStatus:
             client.app.state.router_manager = None
         assert items[0]["cooldown"] is True
 
+    async def test_cooldowns_exception_is_best_effort(self, client):
+        await create_provider(client)
+
+        class ExplodingManager:
+            def cooldowns(self):
+                raise RuntimeError("cooldown api 变更")
+
+        client.app.state.router_manager = ExplodingManager()
+        try:
+            resp = await client.get("/api/providers/status")
+        finally:
+            client.app.state.router_manager = None
+        assert resp.status_code == 200
+        assert resp.json()["items"][0]["cooldown"] is False
+
 
 class TestAdminAuth:
     async def _set_token(self, client, token="secret"):

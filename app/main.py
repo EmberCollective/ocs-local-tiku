@@ -8,7 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app import config
 from app.answer.service import AnswerService
-from app.api import admin_cache, admin_providers, health, query
+from app.api import admin_cache, admin_providers, admin_settings, health, query
 from app.api.deps import require_token
 from app.db import Database
 from app.llm.fake import EchoLLM, UnconfiguredLLM
@@ -43,6 +43,7 @@ def create_app() -> FastAPI:
     # 管理路由统一挂可选鉴权；数据面（query/health）豁免
     app.include_router(admin_providers.router, dependencies=[Depends(require_token)])
     app.include_router(admin_cache.router, dependencies=[Depends(require_token)])
+    app.include_router(admin_settings.router, dependencies=[Depends(require_token)])
     return app
 
 

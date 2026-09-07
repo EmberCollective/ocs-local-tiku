@@ -5,6 +5,7 @@ import pytest
 from app.models import NewQuestion
 from app.repository import questions as questions_repo
 from app.repository import stats as stats_repo
+from app.repository.settings import DEFAULTS, SettingsRepo
 
 pytestmark = pytest.mark.asyncio
 
@@ -133,3 +134,132 @@ class TestStatsApi:
         assert body["total"]["questions"] == 0
         assert body["today"]["llm_calls"] == 0
         assert len(body["daily"]) == 14
+
+
+class RebuildRecorder:
+    """记录 rebuild 调用次数的假 RouterManager。"""
+
+    def __init__(self):
+        self.rebuilds = 0
+
+    async def rebuild(self) -> None:
+        self.rebuilds += 1
+
+
+class TestSettingsApi:
+    async def test_get_returns_defaults_merged(self, client):
+        await SettingsRepo(client.app.state.db).put({"ttl_days": 30})
+        body = (await client.get("/api/settings")).json()
+        assert body["ttl_days"] == 30
+        assert body["cleanup_batch_size"] == DEFAULTS["cleanup_batch_size"]
+        assert body["api_token"] == ""
+
+    async def test_put_updates_and_returns_full_settings(self, client):
+        resp = await client.put("/api/settings", json={"ttl_days": 30, "routing_strategy": "least-busy"})
+        assert resp.status_code == 200
+        assert resp.json()["ttl_days"] == 30
+        assert (await client.get("/api/settings")).json()["routing_strategy"] == "least-busy"
+
+    async def test_put_partial_keeps_other_keys(self, client):
+        await client.put("/api/settings", json={"ttl_days": 30})
+        await client.put("/api/settings", json={"cleanup_batch_size": 100})
+        values = (await client.get("/api/settings")).json()
+        assert values["ttl_days"] == 30
+        assert values["cleanup_batch_size"] == 100
+
+    async def test_put_ignores_unknown_keys(self, client):
+        resp = await client.put("/api/settings", json={"not_a_setting": 1})
+        assert resp.status_code == 200
+        assert (await client.get("/api/settings")).json() == dict(DEFAULTS)
+
+    async def test_put_invalid_value_422(self, client):
+        assert (await client.put("/api/settings", json={"ttl_days": 0})).status_code == 422
+        assert (await client.put("/api/settings", json={"api_token": 123})).status_code == 422
+
+    async def test_api_token_roundtrip(self, client):
+        await client.put("/api/settings", json={"api_token": "t0ken"})
+        # 设置保存后立即生效：无 token 的后续请求被拒
+        assert (await client.get("/api/settings")).status_code == 401
+        values = (await client.get("/api/settings", headers={"X-Token": "t0ken"})).json()
+        assert values["api_token"] == "t0ken"
+        # 重置为空恢复零配置
+        reset = await client.put(
+            "/api/settings", json={"api_token": ""}, headers={"X-Token": "t0ken"}
+        )
+        assert reset.status_code == 200
+        assert (await client.get("/api/settings")).json()["api_token"] == ""
+
+    async def test_rebuild_triggered_only_for_router_keys(self, client):
+        recorder = RebuildRecorder()
+        client.app.state.router_manager = recorder
+        try:
+            await client.put("/api/settings", json={"ttl_days": 7})
+            assert recorder.rebuilds == 0
+            await client.put("/api/settings", json={"llm_timeout": 30})
+            assert recorder.rebuilds == 1
+            await client.put("/api/settings", json={"routing_strategy": "least-busy"})
+            assert recorder.rebuilds == 2
+        finally:
+            client.app.state.router_manager = None
+
+
+class TestLogApi:
+    async def seed_logs(self, client):
+        db = client.app.state.db
+        await stats_repo.log_call(db, kind="hit", question="第一题")
+        await stats_repo.log_call(db, kind="miss", question="第二题", latency_ms=100)
+        await stats_repo.log_call(db, kind="llm-fail", question="第三题", error="boom")
+
+    async def test_default_limit_and_newest_first(self, client):
+        await self.seed_logs(client)
+        resp = await client.get("/api/log")
+        assert resp.status_code == 200
+        items = resp.json()["items"]
+        assert [item["kind"] for item in items] == ["llm-fail", "miss", "hit"]
+        assert items[0]["question"] == "第三题"
+
+    async def test_kind_filter(self, client):
+        await self.seed_logs(client)
+        items = (await client.get("/api/log", params={"kind": "hit"})).json()["items"]
+        assert len(items) == 1
+        assert items[0]["kind"] == "hit"
+
+    async def test_limit_bounds(self, client):
+        await self.seed_logs(client)
+        assert len((await client.get("/api/log", params={"limit": 2})).json()["items"]) == 2
+        assert (await client.get("/api/log", params={"limit": 501})).status_code == 422
+        assert (await client.get("/api/log", params={"limit": 0})).status_code == 422
+
+    async def test_empty_log(self, client):
+        body = (await client.get("/api/log")).json()
+        assert body == {"items": []}
+
+
+@pytest.mark.parametrize(
+    "method,path",
+    [
+        ("GET", "/api/providers"),
+        ("GET", "/api/providers/status"),
+        ("POST", "/api/providers"),
+        ("GET", "/api/cache"),
+        ("GET", "/api/cache/export"),
+        ("GET", "/api/stats"),
+        ("GET", "/api/settings"),
+        ("PUT", "/api/settings"),
+        ("GET", "/api/log"),
+    ],
+)
+async def test_all_admin_endpoints_require_token(client, method, path):
+    await SettingsRepo(client.app.state.db).put({"api_token": "secret"})
+    resp = await client.request(method, path, json={})
+    assert resp.status_code == 401
+    assert resp.json() == {"detail": "unauthorized"}
+
+
+async def test_build_llm_falls_back_without_manager(monkeypatch):
+    """非 FAKE 且 RouterManager 缺失时的兜底占位（防御分支）。"""
+    from app.llm.fake import UnconfiguredLLM
+    from app.main import _build_llm
+
+    monkeypatch.delenv("TIKU_FAKE_LLM", raising=False)
+    assert isinstance(_build_llm(None), UnconfiguredLLM)
