@@ -23,3 +23,20 @@ class QuestionRecord(NewQuestion):
     created_at: int = 0
     last_hit_at: int = 0
     hits: int = 0
+
+
+@dataclass(frozen=True)
+class Provider:
+    """LLM 提供方（OpenAI 兼容端点）。"""
+
+    id: str
+    name: str
+    base_url: str
+    api_key: str
+    model: str
+    priority: int = 1
+    rpm: int | None = None
+    max_parallel: int | None = None
+    enabled: bool = True
+    created_at: int = 0
+    updated_at: int = 0
