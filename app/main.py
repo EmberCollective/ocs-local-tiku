@@ -1,5 +1,6 @@
 """应用工厂：lifespan + CORS + 路由挂载。"""
 
+import asyncio
 import logging
 from contextlib import asynccontextmanager
 
@@ -9,9 +10,11 @@ from fastapi.middleware.cors import CORSMiddleware
 from app import config
 from app.answer.service import AnswerService
 from app.api import health, query
+from app.cleanup import cleanup_loop
 from app.db import Database
 from app.llm.fake import EchoLLM, UnconfiguredLLM
 from app.llm.types import LLMProtocol
+from app.repository.settings import SettingsRepo
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
 
@@ -23,7 +26,13 @@ def create_app() -> FastAPI:
         await db.connect()
         app.state.db = db
         app.state.answer_service = AnswerService(db, _build_llm())
+        cleanup_task = asyncio.create_task(cleanup_loop(db, SettingsRepo(db)))
         yield
+        cleanup_task.cancel()
+        try:
+            await cleanup_task
+        except asyncio.CancelledError:
+            pass  # 关闭路径的预期取消
         await db.close()
 
     app = FastAPI(title="ocs-local-tiku", lifespan=lifespan)
