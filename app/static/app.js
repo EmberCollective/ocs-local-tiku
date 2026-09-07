@@ -13,7 +13,8 @@
  *   GET    /api/cache?page=&page_size=&q=&type=  分页 + 题目模糊搜索
  *   DELETE /api/cache/{id}                       单条删除
  *   POST   /api/cache/delete-batch               {ids:[...]} 批量删除
- *   GET    /api/cache/export                     导出全部缓存 JSON
+ *   GET    /api/cache/export                     导出全部缓存 JSON（attachment 下载）
+ *   POST   /api/import/file                      面板导入（.json / .zip 文件上传）
  *   GET    /api/settings                         读设置
  *   PUT    /api/settings                         写设置（涉及路由的键热重建）
  *
@@ -205,6 +206,7 @@ function tikuApp() {
     cacheItems: [],
     cacheTotal: 0,
     cacheBusy: false,
+    cacheImportBusy: false,
     selectedIds: [],
 
     settingsForm: blankSettingsForm(),
@@ -232,7 +234,8 @@ function tikuApp() {
     async api(path, options = {}) {
       const headers = { ...(options.headers || {}) };
       let body = options.body;
-      if (body !== undefined && typeof body !== 'string') {
+      // FormData（文件上传）原样透传，Content-Type 由浏览器按 multipart 边界生成
+      if (body !== undefined && typeof body !== 'string' && !(body instanceof FormData)) {
         body = JSON.stringify(body);
         headers['Content-Type'] = 'application/json';
       }
@@ -502,6 +505,38 @@ function tikuApp() {
         this.cachePage = 1;
         await this.loadCache();
       }, '已删除 ' + count + ' 条缓存');
+    },
+
+    /** 打开文件选择器（.json / .zip，实际解析与护栏在后端）。 */
+    importCache() {
+      this.$refs.importInput.click();
+    },
+
+    async importFilePicked(event) {
+      const file = event.target.files && event.target.files[0];
+      event.target.value = ''; // 清空以便重复选择同一文件
+      if (!file) return;
+      const name = file.name.toLowerCase();
+      if (!name.endsWith('.json') && !name.endsWith('.zip')) {
+        this.setError('仅支持 .json 或 .zip 文件');
+        return;
+      }
+      this.cacheImportBusy = true;
+      try {
+        const form = new FormData();
+        form.append('file', file);
+        const result = await this.api('/api/import/file', { method: 'POST', body: form });
+        this.setNotice(
+          '导入完成：新增 ' + result.imported + ' · 更新 ' + result.updated +
+          ' · 跳过 ' + result.skipped,
+        );
+        this.cachePage = 1;
+        await this.loadCache();
+      } catch (err) {
+        this.setError(err.message);
+      } finally {
+        this.cacheImportBusy = false;
+      }
     },
 
     exportCache() {

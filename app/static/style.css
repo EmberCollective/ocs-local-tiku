@@ -2,6 +2,9 @@
 
 [x-cloak] { display: none !important; }
 
+/* hidden 属性兜底：防止组件 display 规则（如 .toolbar input）把它顶掉 */
+[hidden] { display: none !important; }
+
 :root {
   --bg: #0f172a;
   --panel: #1e293b;

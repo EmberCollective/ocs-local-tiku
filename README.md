@@ -12,7 +12,7 @@ OCS 网课助手的**本地 AI 题库服务**：LLM 答题 + SQLite 题目哈希
 - ✅ **哈希缓存**：题目规范化（全半角/空白/选项排序归一）→ MD5 主键 → 命中即回；同题选项乱序重放不 miss
 - ✅ **缓存自淘汰**：默认 60 天无命中自动删除，分批次清理不锁库
 - ✅ **多 API 调度**：基于 [litellm](https://github.com/BerriAI/litellm) Router——优先级 failover、限流自动冷却、并发控制；后期可一键切换分流路由（usage-based / least-busy）
-- ✅ **Web 管理面板**：内置零构建单页——Provider 管理（测连/排序/启停）、缓存管理（搜索/批删/导出）、命中率与 token 统计仪表盘
+- ✅ **Web 管理面板**：内置零构建单页——Provider 管理（测连/排序/启停）、缓存管理（搜索/批删/导入 JSON 或 ZIP/导出下载）、命中率与 token 统计仪表盘
 - ✅ **答案防固化**：LLM 答案解析/选项匹配失败绝不入缓存；缓存存「答案内容」而非字母，选项乱序重放不答错
 - ✅ **单文件数据**：缓存/配置/统计全在一个 `tiku.db`，备份 = 复制一个文件
 
@@ -89,7 +89,8 @@ OCS ──/api/query──▶ 规范化+哈希 ──▶ SQLite 命中？
 - [x] **M2** litellm 集成 + Provider 管理 API + 用量统计
 - [x] **M3** Web 管理面板
 - [x] **M4** TTL 批次清理 + 批量导入 API + Docker 部署收尾
-- [ ] 二期：批量导入 UI、tikuAdapter 题库格式互导、FTS5 全文搜索
+- [x] **M5** 面板批量导入 UI（JSON/ZIP 文件上传）+ 导出附件下载
+- [ ] 二期：tikuAdapter 题库格式互导、FTS5 全文搜索
 
 ## 技术栈
 

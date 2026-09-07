@@ -1,6 +1,10 @@
 """管理 API：缓存分页/搜索/删除/导出 + 统计摘要（design §7）。"""
 
+import json
+from datetime import datetime
+
 from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import Response
 from pydantic import BaseModel
 
 from app.api.deps import get_db
@@ -43,8 +47,17 @@ async def list_cache(
 
 
 @router.get("/api/cache/export")
-async def export_cache(db: Database = Depends(get_db)) -> dict:
-    return {"items": await questions_repo.export_all(db)}
+async def export_cache(db: Database = Depends(get_db)) -> Response:
+    """导出全部缓存：attachment 头让浏览器直接下载（可直接再导入面板）。"""
+    payload = json.dumps(
+        {"items": await questions_repo.export_all(db)}, ensure_ascii=False
+    )
+    filename = f"tiku-export-{datetime.now():%Y%m%d-%H%M%S}.json"
+    return Response(
+        content=payload,
+        media_type="application/json",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 @router.delete("/api/cache/{question_id}")

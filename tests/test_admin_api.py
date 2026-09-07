@@ -99,6 +99,17 @@ class TestCacheApi:
             "question": "题目一", "type": "single", "options": ["A. 甲", "B. 乙"], "answer": "甲",
         }
 
+    async def test_export_downloads_as_attachment(self, client):
+        """导出带 attachment 头 → 浏览器落盘下载而不是新标签页展示。"""
+        await seed_question(client, question="题目一")
+        resp = await client.get("/api/cache/export")
+        assert resp.status_code == 200
+        disposition = resp.headers["content-disposition"]
+        assert disposition.startswith('attachment; filename="tiku-export-')
+        assert disposition.endswith('.json"')
+        assert resp.headers["content-type"].startswith("application/json")
+        assert resp.json()["items"][0]["question"] == "题目一"
+
 
 class TestStatsApi:
     async def test_shape_today_total_and_daily_series(self, client):
