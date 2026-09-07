@@ -1,19 +1,25 @@
-"""questions 读写仓储：touch、分页搜索、批量删、导出。"""
+"""questions 读写仓储：touch、分页搜索、批量删、导出、批量导入。"""
 
 import json
 import logging
 import sqlite3
 import time
+from collections.abc import Mapping, Sequence
 
 from app.db import Database
 from app.models import NewQuestion, QuestionRecord
-from app.normalize import normalize_text
+from app.normalize import build_cache_key, canonical_qtype, normalize_text, split_options
 
 logger = logging.getLogger(__name__)
 
 _INSERT_SQL = """
 INSERT INTO questions (cache_key, question, qtype, options_json, answer, source)
 VALUES (?, ?, ?, ?, ?, ?)
+"""
+
+_UPDATE_IMPORT_SQL = """
+UPDATE questions SET question = ?, qtype = ?, options_json = ?, answer = ?
+WHERE cache_key = ?
 """
 
 
@@ -28,7 +34,7 @@ async def insert_question(db: Database, record: NewQuestion) -> bool:
         record.cache_key,
         record.question,
         record.qtype,
-        json.dumps(record.options, ensure_ascii=False),
+        _dump_options(record.options),
         record.answer,
         record.source,
     )
@@ -71,6 +77,80 @@ async def delete_by_ids(db: Database, ids: list[int]) -> int:
         return 0
     placeholders = ",".join("?" for _ in ids)
     return await db.execute(f"DELETE FROM questions WHERE id IN ({placeholders})", tuple(ids))
+
+
+async def upsert_import(db: Database, items: Sequence[object]) -> tuple[int, int, int]:
+    """批量导入（单事务）：新键 INSERT（source='import'）、同键 UPDATE、坏行跳过不中断。
+
+    返回 (imported, updated, skipped)。
+    """
+    imported = updated = skipped = 0
+    async with db.transaction():
+        for item in items:
+            record = _prepare_import_item(item)
+            if record is None:
+                skipped += 1
+                continue
+            try:
+                if await get_by_key(db, record.cache_key) is not None:
+                    await _apply_import_update(db, record)
+                    updated += 1
+                else:
+                    await db.insert(
+                        _INSERT_SQL,
+                        (record.cache_key, record.question, record.qtype,
+                         _dump_options(record.options), record.answer, record.source),
+                    )
+                    imported += 1
+            except Exception as error:
+                skipped += 1
+                logger.warning("导入行失败（跳过）：%r — %s", item, error)
+    return imported, updated, skipped
+
+
+def _prepare_import_item(item: object) -> NewQuestion | None:
+    """单条导入归一：缺 question/answer、options 非法 → None（跳过）。"""
+    if not isinstance(item, Mapping):
+        return None
+    question = item.get("question")
+    answer = item.get("answer")
+    if not isinstance(question, str) or not question.strip():
+        return None
+    if not isinstance(answer, str) or not answer.strip():
+        return None
+    options = _import_options(item.get("options"))
+    if options is None:
+        return None
+    qtype_raw = item.get("type")
+    qtype = canonical_qtype(qtype_raw if isinstance(qtype_raw, str) else None)
+    return NewQuestion(
+        cache_key=build_cache_key(question, qtype, options),
+        question=question.strip(), qtype=qtype, options=options,
+        answer=answer.strip(), source="import",
+    )
+
+
+def _import_options(raw: object) -> list[str] | None:
+    """options 兼容 str（按分隔符切分）与 list[str]（逐项清洗）；非法类型返回 None。"""
+    if raw is None:
+        return []
+    if isinstance(raw, str):
+        return split_options(raw)
+    if isinstance(raw, list) and all(isinstance(option, str) for option in raw):
+        return [option.strip() for option in raw if option.strip()]
+    return None
+
+
+async def _apply_import_update(db: Database, record: NewQuestion) -> None:
+    await db.execute(
+        _UPDATE_IMPORT_SQL,
+        (record.question, record.qtype, _dump_options(record.options), record.answer,
+         record.cache_key),
+    )
+
+
+def _dump_options(options: list[str]) -> str:
+    return json.dumps(options, ensure_ascii=False)
 
 
 async def export_all(db: Database) -> list[dict]:
