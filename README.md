@@ -21,10 +21,12 @@ OCS 网课助手的**本地 AI 题库服务**：LLM 答题 + SQLite 题目哈希
 ### 本地直跑
 
 ```bash
-python -m venv .venv && .venv/Scripts/activate   # Windows
+python3 -m venv .venv && source .venv/bin/activate   # macOS / Linux（Windows: .venv\Scripts\activate）
 pip install -r requirements.txt
-python run.py                                    # http://127.0.0.1:8000
+python run.py                                        # http://127.0.0.1:8000
 ```
+
+> 也可用 [uv](https://docs.astral.sh/uv/)：`uv venv --python 3.13 && uv pip install -r requirements-dev.txt && uv run --no-project python run.py`
 
 打开面板 → Provider 管理新增你的 API（base_url / api_key / model）→ 复制「OCS 配置指引」中的 JSON 到 OCS 全局设置的题库配置。
 
@@ -67,7 +69,7 @@ OCS ──/api/query──▶ 规范化+哈希 ──▶ SQLite 命中？
 
 ## 路线图
 
-- [ ] **M1** 骨架 + 缓存层 + FakeLLM 查询闭环（协议联通验证）
+- [x] **M1** 骨架 + 缓存层 + FakeLLM 查询闭环（协议联通验证）
 - [ ] **M2** litellm 集成 + Provider 管理 API + 用量统计
 - [ ] **M3** Web 管理面板
 - [ ] **M4** TTL 批次清理 + 批量导入 API + 文档收尾
