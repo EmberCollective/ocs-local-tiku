@@ -36,7 +36,23 @@ python run.py                                        # http://127.0.0.1:8000
 docker compose up -d --build
 ```
 
-数据持久化于 named volume `tiku-data`（`/data/tiku.db`）。
+- 端口默认只绑宿主机回环 `127.0.0.1:8000`（局域网访问改 compose 里的 `ports`）
+- 数据持久化于 named volume `tiku-data`（容器内 `/data/tiku.db`）
+- 容器自带 healthcheck（`docker ps` 看 healthy）；时区 `Asia/Shanghai` 保证按天统计分桶正确
+
+**备份**（宿主机当前目录得到 `tiku.db` 副本）：
+
+```bash
+docker run --rm -v tiku-data:/data -v "$PWD":/backup alpine cp /data/tiku.db /backup/
+```
+
+**空间回收**：大量删除/清理后 `tiku.db` 不会自动缩小（SQLite 特性），需要时做一次 VACUUM：
+
+```bash
+docker compose down
+docker run --rm -v tiku-data:/data alpine sqlite3 /data/tiku.db "VACUUM;"
+docker compose up -d
+```
 
 ### OCS 端配置
 
@@ -70,9 +86,9 @@ OCS ──/api/query──▶ 规范化+哈希 ──▶ SQLite 命中？
 ## 路线图
 
 - [x] **M1** 骨架 + 缓存层 + FakeLLM 查询闭环（协议联通验证）
-- [ ] **M2** litellm 集成 + Provider 管理 API + 用量统计
-- [ ] **M3** Web 管理面板
-- [ ] **M4** TTL 批次清理 + 批量导入 API + 文档收尾
+- [x] **M2** litellm 集成 + Provider 管理 API + 用量统计
+- [x] **M3** Web 管理面板
+- [x] **M4** TTL 批次清理 + 批量导入 API + Docker 部署收尾
 - [ ] 二期：批量导入 UI、tikuAdapter 题库格式互导、FTS5 全文搜索
 
 ## 技术栈
