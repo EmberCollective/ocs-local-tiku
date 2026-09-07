@@ -66,9 +66,9 @@ def create_app() -> FastAPI:
     app.include_router(admin_settings.router, dependencies=[Depends(require_token)])
     app.include_router(import_api.router)
 
-    @app.get("/", include_in_schema=False)
+    @app.api_route("/", methods=["GET", "HEAD"], include_in_schema=False)
     async def serve_panel() -> FileResponse:
-        """Web 管理面板入口页。"""
+        """Web 管理面板入口页；HEAD 供 OCS 题库连通性探测。"""
         return FileResponse(STATIC_DIR / "index.html")
 
     app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")

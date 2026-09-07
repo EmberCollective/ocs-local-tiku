@@ -25,3 +25,9 @@ async def test_alpine_served_locally(client):
     resp = await client.get("/static/alpine.min.js")
     assert resp.status_code == 200
     assert "Alpine" in resp.text or "alpine" in resp.text
+
+
+async def test_root_supports_head(client):
+    """OCS 题库连通性探测发 HEAD /（带 ?t= 缓存破坏参数），须回 200 而非 405。"""
+    resp = await client.head("/", params={"t": "1788800025486"})
+    assert resp.status_code == 200
