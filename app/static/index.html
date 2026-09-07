@@ -1,0 +1,326 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>本地题库 · 管理面板</title>
+  <link rel="stylesheet" href="/static/style.css">
+  <script defer src="/static/app.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3/dist/cdn.min.js"></script>
+</head>
+<body>
+  <div class="app" x-data="tikuApp()">
+
+    <!-- 顶部提示条 -->
+    <div class="banner banner-error" x-show="error" x-cloak>
+      <span x-text="error"></span>
+      <button class="banner-close" @click="error = ''">✕</button>
+    </div>
+    <div class="banner banner-notice" x-show="notice" x-cloak>
+      <span x-text="notice"></span>
+    </div>
+
+    <!-- 顶栏 -->
+    <header class="topbar">
+      <h1>本地题库 · 管理面板</h1>
+      <label class="token-box">
+        访问令牌
+        <input type="password" x-model="token" @change="saveToken()" placeholder="未启用鉴权可留空">
+      </label>
+    </header>
+
+    <!-- Tab 导航 -->
+    <nav class="tabs">
+      <button :class="{ active: tab === 'dashboard' }" @click="switchTab('dashboard')">仪表盘</button>
+      <button :class="{ active: tab === 'providers' }" @click="switchTab('providers')">Provider 管理</button>
+      <button :class="{ active: tab === 'cache' }" @click="switchTab('cache')">缓存管理</button>
+      <button :class="{ active: tab === 'settings' }" @click="switchTab('settings')">设置</button>
+    </nav>
+
+    <!-- Tab 1：仪表盘 -->
+    <section x-show="tab === 'dashboard'" x-cloak>
+      <div class="cards">
+        <div class="card">
+          <div class="card-value" x-text="stats ? stats.todayHits : '—'"></div>
+          <div class="card-label">今日命中</div>
+        </div>
+        <div class="card">
+          <div class="card-value" x-text="stats ? stats.todayMisses : '—'"></div>
+          <div class="card-label">今日未命中</div>
+        </div>
+        <div class="card">
+          <div class="card-value" x-text="todayHitRate()"></div>
+          <div class="card-label">今日命中率</div>
+        </div>
+        <div class="card">
+          <div class="card-value" x-text="stats ? stats.todayLlmCalls : '—'"></div>
+          <div class="card-label">今日 LLM 调用</div>
+        </div>
+        <div class="card">
+          <div class="card-value" x-text="stats ? stats.todayFailures : '—'"></div>
+          <div class="card-label">今日失败</div>
+        </div>
+        <div class="card">
+          <div class="card-value" x-text="stats ? stats.totalQuestions : '—'"></div>
+          <div class="card-label">累计缓存条数</div>
+        </div>
+      </div>
+
+      <div class="panel">
+        <h2>近 14 天调用趋势</h2>
+        <div class="chart-legend">
+          <span class="dot dot-hit"></span>命中
+          <span class="dot dot-miss"></span>未命中
+        </div>
+        <div class="chart" x-show="stats && stats.days.length">
+          <template x-for="day in stats ? stats.days : []" :key="day.day">
+            <div class="chart-col">
+              <div class="chart-bars">
+                <div class="bar bar-hit" :style="'height:' + barHeight(day.hits)"
+                     :title="day.day + ' 命中 ' + day.hits"></div>
+                <div class="bar bar-miss" :style="'height:' + barHeight(day.misses)"
+                     :title="day.day + ' 未命中 ' + day.misses"></div>
+              </div>
+              <div class="chart-label" x-text="fmtDay(day.day)"></div>
+            </div>
+          </template>
+        </div>
+        <div class="empty" x-show="stats && !stats.days.length">暂无趋势数据</div>
+      </div>
+
+      <div class="panel">
+        <h2>最近调用</h2>
+        <table class="table">
+          <thead>
+            <tr>
+              <th>时间</th><th>类型</th><th>题目</th><th>模型</th><th>延迟</th><th>错误</th>
+            </tr>
+          </thead>
+          <tbody>
+            <template x-for="(item, idx) in logItems" :key="idx">
+              <tr>
+                <td class="cell-nowrap" x-text="fmtTs(item.ts)"></td>
+                <td><span class="badge" :class="badgeClass(item.kind)" x-text="kindLabel(item.kind)"></span></td>
+                <td :title="item.question" x-text="truncText(item.question)"></td>
+                <td class="cell-mono" x-text="item.model || '—'"></td>
+                <td x-text="item.latency_ms != null ? item.latency_ms + ' ms' : '—'"></td>
+                <td class="cell-error" :title="item.error" x-text="truncText(item.error, 30) || '—'"></td>
+              </tr>
+            </template>
+          </tbody>
+        </table>
+        <div class="empty" x-show="!logItems.length">暂无调用记录</div>
+      </div>
+
+      <!-- OCS 配置指引 -->
+      <div class="panel">
+        <h2>OCS 配置指引</h2>
+        <p class="hint">
+          在 OCS 脚本设置的「题库配置（AnswererWrapper）」中新增如下条目
+          （题目参数会自动替换 <code>${title}</code>/<code>${type}</code>/<code>${options}</code>）：
+        </p>
+        <pre x-text="ocsJson"></pre>
+        <button class="btn btn-primary" @click="copyOcs()">复制 JSON</button>
+        <p class="hint">
+          提示：请求类型建议选择 GM_xmlhttpRequest 以绕过跨域限制；答案支持选项字母（A#B#C）或选项原文，OCS 会自动匹配。
+        </p>
+      </div>
+    </section>
+
+    <!-- Tab 2：Provider 管理 -->
+    <section x-show="tab === 'providers'" x-cloak>
+      <div class="panel">
+        <div class="panel-head">
+          <h2>Provider 列表（自上而下 = 优先级顺序）</h2>
+          <button class="btn btn-primary" @click="openProviderModal(null)">新增 Provider</button>
+        </div>
+        <table class="table">
+          <thead>
+            <tr>
+              <th>优先级</th><th>名称</th><th>Base URL</th><th>模型</th><th>状态</th><th>操作</th>
+            </tr>
+          </thead>
+          <tbody>
+            <template x-for="(provider, index) in providers" :key="provider.id">
+              <tr>
+                <td x-text="index + 1"></td>
+                <td x-text="provider.name"></td>
+                <td class="cell-mono" x-text="provider.base_url"></td>
+                <td class="cell-mono" x-text="provider.model"></td>
+                <td>
+                  <button class="switch" :class="{ on: provider.enabled }"
+                          :title="provider.enabled ? '已启用，点击停用' : '已停用，点击启用'"
+                          @click="toggleProvider(provider)">
+                    <span class="switch-knob"></span>
+                  </button>
+                </td>
+                <td class="cell-actions">
+                  <button class="btn" @click="moveProvider(index, -1)" :disabled="index === 0">↑</button>
+                  <button class="btn" @click="moveProvider(index, 1)"
+                          :disabled="index === providers.length - 1">↓</button>
+                  <button class="btn" @click="testProvider(provider)">测连</button>
+                  <button class="btn" @click="openProviderModal(provider)">编辑</button>
+                  <button class="btn btn-danger" @click="removeProvider(provider)">删除</button>
+                </td>
+              </tr>
+            </template>
+          </tbody>
+        </table>
+        <div class="empty" x-show="!providers.length">尚未配置 provider，点击右上角新增</div>
+
+        <div class="test-result" x-show="testResult" x-cloak>
+          <template x-if="testResult">
+            <p>
+              <strong x-text="testResult.name"></strong>：
+              <span x-show="testResult.pending">测试中…</span>
+              <span class="test-ok" x-show="!testResult.pending && testResult.ok"
+                    x-text="'连通 · ' + (testResult.latency_ms ?? '?') + ' ms · ' + truncText(testResult.reply, 60)"></span>
+              <span class="test-bad" x-show="!testResult.pending && !testResult.ok"
+                    x-text="'失败 · ' + (testResult.error || '未知错误')"></span>
+            </p>
+          </template>
+        </div>
+      </div>
+
+      <div class="panel">
+        <h2>路由策略说明</h2>
+        <ul class="hint-list">
+          <li>表格自上而下即 failover 顺序：排在前面的 provider 失败（连接错误/超时/429）时自动降级到下一个。</li>
+          <li>用 ↑↓ 调整优先级，启停开关可临时摘除某个 provider，均即时生效。</li>
+          <li>失败次数超过设置页的 allowed_fails 后，该 provider 会被冷却 cooldown_time 秒，期间不参与调度。</li>
+          <li>路由策略可在「设置」页切换：simple-shuffle（优先级 failover，默认）/ usage-based-routing-v2（按用量分流）/ least-busy（最少在途请求），保存后热重建生效。</li>
+        </ul>
+      </div>
+
+      <!-- 新增/编辑弹层 -->
+      <div class="modal-mask" x-show="providerModalOpen" x-cloak @click.self="closeProviderModal()">
+        <div class="modal">
+          <h2 x-text="providerEditing ? '编辑 Provider' : '新增 Provider'"></h2>
+          <label>名称
+            <input x-model="providerForm.name" placeholder="如 deepseek">
+          </label>
+          <label>Base URL（OpenAI 兼容，含 /v1）
+            <input x-model="providerForm.base_url" placeholder="https://api.deepseek.com/v1">
+          </label>
+          <label>模型
+            <input x-model="providerForm.model" placeholder="如 deepseek-chat">
+          </label>
+          <label>API Key
+            <input type="password" x-model="providerForm.api_key" placeholder="留空不修改">
+          </label>
+          <label>RPM 限速（可选，留空不限）
+            <input type="number" min="0" x-model="providerForm.rpm" placeholder="如 60">
+          </label>
+          <label>最大并发（可选，留空不限）
+            <input type="number" min="0" x-model="providerForm.max_parallel" placeholder="如 5">
+          </label>
+          <div class="modal-actions">
+            <button class="btn" @click="closeProviderModal()">取消</button>
+            <button class="btn btn-primary" @click="saveProvider()">保存</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Tab 3：缓存管理 -->
+    <section x-show="tab === 'cache'" x-cloak>
+      <div class="panel">
+        <div class="toolbar">
+          <input x-model="cacheQ" @keydown.enter="searchCache()" placeholder="按题目模糊搜索">
+          <select x-model="cacheType" @change="searchCache()">
+            <option value="">全部题型</option>
+            <option value="single">单选</option>
+            <option value="multiple">多选</option>
+            <option value="judgement">判断</option>
+            <option value="completion">填空</option>
+          </select>
+          <button class="btn btn-primary" @click="searchCache()">搜索</button>
+          <span class="toolbar-spacer"></span>
+          <button class="btn" @click="exportCache()">导出全部</button>
+          <button class="btn btn-danger" @click="deleteSelected()" :disabled="!selectedIds.length">
+            删除所选（<span x-text="selectedIds.length"></span>）
+          </button>
+        </div>
+
+        <table class="table">
+          <thead>
+            <tr>
+              <th><input type="checkbox" :checked="allPageSelected()" @change="toggleSelectAll()"></th>
+              <th>题目</th><th>题型</th><th>答案</th><th>来源</th><th>命中数</th><th>最后命中</th><th>操作</th>
+            </tr>
+          </thead>
+          <tbody>
+            <template x-for="item in cacheItems" :key="item.id">
+              <tr>
+                <td><input type="checkbox" :checked="isSelected(item.id)" @change="toggleSelect(item.id)"></td>
+                <td :title="item.question" x-text="truncText(item.question)"></td>
+                <td x-text="qtypeLabel(item.qtype)"></td>
+                <td :title="item.answer" x-text="truncText(item.answer, 24)"></td>
+                <td x-text="item.source"></td>
+                <td x-text="item.hits"></td>
+                <td class="cell-nowrap" x-text="fmtTs(item.last_hit_at)"></td>
+                <td><button class="btn btn-danger" @click="deleteCacheItem(item)">删除</button></td>
+              </tr>
+            </template>
+          </tbody>
+        </table>
+        <div class="empty" x-show="!cacheItems.length && !cacheBusy">暂无缓存（答题后自动沉淀，也可批量导入）</div>
+
+        <div class="pager">
+          <button class="btn" @click="changePage(-1)" :disabled="cachePage <= 1">上一页</button>
+          <span>
+            第 <span x-text="cachePage"></span> / <span x-text="cacheTotalPages()"></span> 页
+            · 共 <span x-text="cacheTotal"></span> 条
+          </span>
+          <button class="btn" @click="changePage(1)" :disabled="cachePage >= cacheTotalPages()">下一页</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- Tab 4：设置 -->
+    <section x-show="tab === 'settings'" x-cloak>
+      <div class="panel">
+        <h2>服务设置</h2>
+        <div class="settings-grid">
+          <label>缓存保留天数（TTL）
+            <input type="number" min="1" x-model.number="settingsForm.ttl_days">
+          </label>
+          <label>清理批大小（条/批）
+            <input type="number" min="1" x-model.number="settingsForm.cleanup_batch_size">
+          </label>
+          <label>清理间隔（小时）
+            <input type="number" min="1" x-model.number="settingsForm.cleanup_interval_hours">
+          </label>
+          <label>LLM 超时（秒）
+            <input type="number" min="1" x-model.number="settingsForm.llm_timeout">
+          </label>
+          <label>LLM 重试次数
+            <input type="number" min="0" x-model.number="settingsForm.num_retries">
+          </label>
+          <label>冷却触发失败数（allowed_fails）
+            <input type="number" min="1" x-model.number="settingsForm.allowed_fails">
+          </label>
+          <label>冷却时长（秒）
+            <input type="number" min="1" x-model.number="settingsForm.cooldown_time">
+          </label>
+          <label>路由策略
+            <select x-model="settingsForm.routing_strategy">
+              <option value="simple-shuffle">simple-shuffle（优先级 failover）</option>
+              <option value="usage-based-routing-v2">usage-based-routing-v2（按用量分流）</option>
+              <option value="least-busy">least-busy（最少在途请求）</option>
+            </select>
+          </label>
+          <label>管理 API 访问令牌（留空关闭鉴权）
+            <input type="password" x-model="settingsForm.api_token" placeholder="留空关闭鉴权">
+          </label>
+        </div>
+        <p class="hint">
+          llm_timeout / num_retries / allowed_fails / cooldown_time / 路由策略修改保存后会热重建 LLM 路由，无需重启服务。
+        </p>
+        <button class="btn btn-primary" @click="saveSettings()" :disabled="settingsBusy">保存设置</button>
+      </div>
+    </section>
+
+  </div>
+</body>
+</html>
