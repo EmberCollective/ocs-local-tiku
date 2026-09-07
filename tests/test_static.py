@@ -18,3 +18,10 @@ async def test_static_style_css_is_served(client):
     resp = await client.get("/static/style.css")
     assert resp.status_code == 200
     assert "css" in resp.headers["content-type"]
+
+
+async def test_alpine_served_locally(client):
+    """面板不依赖外部 CDN：Alpine 由本地 /static 提供（离线可用）。"""
+    resp = await client.get("/static/alpine.min.js")
+    assert resp.status_code == 200
+    assert "Alpine" in resp.text or "alpine" in resp.text

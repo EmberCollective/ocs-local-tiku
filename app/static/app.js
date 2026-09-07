@@ -37,13 +37,15 @@ const NUMERIC_SETTING_KEYS = [
   'cooldown_time',
 ];
 
-const OCS_CONFIG = {
-  url: 'http://127.0.0.1:8000/api/query',
-  name: '本地题库',
-  method: 'get',
-  data: { title: '${title}', type: '${type}', options: '${options}' },
-  handler: 'return (res) => res.code === 1 ? [res.question, res.answer] : undefined',
-};
+const OCS_CONFIG = [
+  {
+    url: 'http://127.0.0.1:8000/api/query',
+    name: '本地题库',
+    method: 'get',
+    data: { title: '${title}', type: '${type}', options: '${options}' },
+    handler: 'return (res) => res.code === 1 ? [res.question, res.answer] : undefined',
+  },
+];
 
 const OCS_CONFIG_JSON = JSON.stringify(OCS_CONFIG, null, 2);
 

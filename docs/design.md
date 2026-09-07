@@ -71,13 +71,15 @@
 ### 用户 OCS 端配置（随 README 提供）
 
 ```json
-{
-  "url": "http://127.0.0.1:8000/api/query",
-  "name": "本地题库",
-  "method": "get",
-  "data": { "title": "${title}", "type": "${type}", "options": "${options}" },
-  "handler": "return (res) => res.code === 1 ? [res.question, res.answer] : undefined"
-}
+[
+  {
+    "url": "http://127.0.0.1:8000/api/query",
+    "name": "本地题库",
+    "method": "get",
+    "data": { "title": "${title}", "type": "${type}", "options": "${options}" },
+    "handler": "return (res) => res.code === 1 ? [res.question, res.answer] : undefined"
+  }
+]
 ```
 
 ### options 规范化（normalize.py，缓存命中率的根基）
