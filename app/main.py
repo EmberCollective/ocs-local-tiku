@@ -9,7 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app import config
 from app.answer.service import AnswerService
-from app.api import health, query
+from app.api import health, import_api, query
 from app.cleanup import cleanup_loop
 from app.db import Database
 from app.llm.fake import EchoLLM, UnconfiguredLLM
@@ -44,6 +44,7 @@ def create_app() -> FastAPI:
     )
     app.include_router(health.router)
     app.include_router(query.router)
+    app.include_router(import_api.router)
     return app
 
 
