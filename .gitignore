@@ -1,0 +1,22 @@
+# 运行时数据（SQLite 库、缓存）
+data/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# 测试 / 工具缓存
+.pytest_cache/
+.coverage
+htmlcov/
+
+# IDE
+.idea/
+.vscode/
+
+# 系统
+.DS_Store
+Thumbs.db
