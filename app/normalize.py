@@ -44,6 +44,13 @@ def strip_option_prefix(option: str) -> str:
     return OPTION_PREFIX_RE.sub("", option.strip(), count=1).strip()
 
 
+def option_key(option: str) -> str:
+    """选项匹配键：先 NFKC 归一（全角前缀折叠为 ASCII）再剥字母前缀，再归一尾标点。"""
+    normalized = normalize_text(option)
+    stripped = OPTION_PREFIX_RE.sub("", normalized, count=1)
+    return normalize_text(stripped)
+
+
 def split_options(raw: str | None) -> list[str]:
     """按分隔符优先级切分，取切出非空片段最多的结果；全空视为无选项。"""
     if not raw or not raw.strip():
@@ -62,8 +69,7 @@ def build_cache_key(title: str, qtype: str, options: list[str]) -> str:
     if qtype in NO_OPTION_QTYPES:
         option_part = ""
     else:
-        normalized_options = sorted(normalize_text(strip_option_prefix(o)) for o in options)
-        option_part = "\x1f".join(normalized_options)
+        option_part = "\x1f".join(sorted(option_key(o) for o in options))
     payload = f"{normalize_text(title)}|{qtype}|{option_part}"
     return hashlib.md5(payload.encode("utf-8")).hexdigest()
 
