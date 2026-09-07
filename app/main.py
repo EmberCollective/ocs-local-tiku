@@ -3,15 +3,18 @@
 import logging
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app import config
 from app.answer.service import AnswerService
-from app.api import health, query
+from app.api import admin_providers, health, query
+from app.api.deps import require_token
 from app.db import Database
 from app.llm.fake import EchoLLM, UnconfiguredLLM
 from app.llm.types import LLMProtocol
+from app.repository import providers as providers_repo
+from app.repository.settings import SettingsRepo
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
 
@@ -22,7 +25,9 @@ def create_app() -> FastAPI:
         db = Database(config.db_path())
         await db.connect()
         app.state.db = db
-        app.state.answer_service = AnswerService(db, _build_llm())
+        router_manager = await _build_router_manager(db)
+        app.state.router_manager = router_manager
+        app.state.answer_service = AnswerService(db, _build_llm(router_manager))
         yield
         await db.close()
 
@@ -35,14 +40,33 @@ def create_app() -> FastAPI:
     )
     app.include_router(health.router)
     app.include_router(query.router)
+    # 管理路由统一挂可选鉴权；数据面（query/health）豁免
+    app.include_router(admin_providers.router, dependencies=[Depends(require_token)])
     return app
 
 
-def _build_llm() -> LLMProtocol:
-    """M1：冒烟开关决定 EchoLLM/占位；M2 起替换为 RouterManager。"""
+async def _build_router_manager(db: Database):
+    """非 FAKE 模式创建 RouterManager 并完成首轮构建；FAKE 模式返回 None。"""
+    if config.fake_llm_enabled():
+        return None
+    from app.llm.router_manager import RouterManager  # 延迟导入：FAKE/单元测试不加载 litellm
+
+    manager = RouterManager(
+        db,
+        list_enabled=lambda: providers_repo.list_enabled(db),
+        settings=SettingsRepo(db),
+    )
+    await manager.rebuild()
+    return manager
+
+
+def _build_llm(router_manager) -> LLMProtocol:
+    """FAKE 模式用 EchoLLM；生产路径用 RouterManager（无 provider 时 ask 报未配置）。"""
     if config.fake_llm_enabled():
         return EchoLLM()
-    return UnconfiguredLLM()
+    if router_manager is None:
+        return UnconfiguredLLM()
+    return router_manager
 
 
 app = create_app()

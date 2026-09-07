@@ -35,6 +35,11 @@ def today() -> str:
     return time.strftime("%Y-%m-%d")
 
 
+def days_ago(n: int) -> str:
+    """n 天前的 YYYY-MM-DD（本地时区），供统计窗口/趋势序列使用。"""
+    return time.strftime("%Y-%m-%d", time.localtime(time.time() - n * 86400))
+
+
 async def bump_daily(db: Database, day: str, **deltas: int) -> None:
     await _upsert_counters(db, "stats_daily", ("day",), (day,), DAILY_FIELDS, deltas)
 
@@ -74,6 +79,37 @@ async def log_call(
     placeholders = ", ".join("?" for _ in columns)
     sql = f"INSERT INTO call_log ({', '.join(columns)}) VALUES ({placeholders})"
     await db.insert(sql, (kind, *provided.values()))
+
+
+async def provider_stats_since(db: Database, since_day: str) -> dict[str, dict]:
+    """近 24h 各 provider 聚合（day 粒度：昨日+今日），键为 provider_id。"""
+    rows = await db.query(
+        "SELECT provider_id, SUM(calls) AS calls, SUM(failures) AS failures,"
+        " SUM(prompt_tokens) AS prompt_tokens, SUM(completion_tokens) AS completion_tokens"
+        " FROM provider_stats_daily WHERE day >= ? GROUP BY provider_id",
+        (since_day,),
+    )
+    return {row["provider_id"]: dict(row) for row in rows}
+
+
+async def avg_latency_since(db: Database, since_ts: int) -> dict[str, float]:
+    """近 24h call_log 各 provider 平均延迟（毫秒），键为 provider_id。"""
+    rows = await db.query(
+        "SELECT provider_id, AVG(latency_ms) AS avg_latency_ms FROM call_log"
+        " WHERE provider_id IS NOT NULL AND ts >= ? GROUP BY provider_id",
+        (since_ts,),
+    )
+    return {row["provider_id"]: row["avg_latency_ms"] for row in rows}
+
+
+async def list_log(db: Database, *, limit: int, kind: str | None) -> list[dict]:
+    """调用日志倒序（新→旧）；kind 可选过滤。"""
+    if kind:
+        return await db.query(
+            "SELECT * FROM call_log WHERE kind = ? ORDER BY ts DESC, id DESC LIMIT ?",
+            (kind, limit),
+        )
+    return await db.query("SELECT * FROM call_log ORDER BY ts DESC, id DESC LIMIT ?", (limit,))
 
 
 async def _upsert_counters(
