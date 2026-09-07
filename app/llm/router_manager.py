@@ -8,6 +8,7 @@ import time
 
 os.environ.setdefault("LITELLM_TELEMETRY", "False")
 
+import litellm  # noqa: E402
 from litellm import Router, acompletion  # noqa: E402
 
 from app.db import Database
@@ -55,6 +56,18 @@ class RouterManager:
         providers = await self._list_enabled()
         settings = await self._settings.get_all()
         model_list = build_model_list(providers, settings)
+        # litellm 1.100 起 Router 不再接受 callbacks 参数，CustomLogger 走模块级注册
+        litellm.callbacks = (
+            [
+                UsageTracker(
+                    api_base_map={p.base_url: p.id for p in providers},
+                    on_success=self._on_provider_success,
+                    on_failure=self._on_provider_failure,
+                )
+            ]
+            if model_list
+            else []
+        )
         if not model_list:
             self._router = None
             return
@@ -68,13 +81,6 @@ class RouterManager:
                 "temperature": 0,
                 "timeout": settings["llm_timeout"],
             },
-            callbacks=[
-                UsageTracker(
-                    api_base_map={p.base_url: p.id for p in providers},
-                    on_success=self._on_provider_success,
-                    on_failure=self._on_provider_failure,
-                )
-            ],
         )
 
     async def ask(self, messages: list[dict]) -> AskResult:

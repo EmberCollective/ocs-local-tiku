@@ -237,3 +237,17 @@ class TestUsageTracker:
 @pytest.mark.live
 async def test_live_smoke_skipped_by_default():  # pragma: no cover
     """真实 provider 冒烟（--live 显式开启）。"""
+
+
+async def test_rebuild_constructs_real_router(db, monkeypatch):
+    """回归：真实 litellm.Router 必须接受全部构造参数（无效 callbacks 参数曾导致线上 500）。"""
+    monkeypatch.setattr(rm.litellm, "callbacks", [])
+    manager = RouterManager(
+        db, list_enabled=make_list_enabled([make_provider()]), settings=FakeSettings()
+    )
+    await manager.rebuild()  # 不应抛 TypeError
+    assert manager.cooldowns() == []
+    # 空 provider 时同步清空全局回调注册
+    empty = RouterManager(db, list_enabled=make_list_enabled([]), settings=FakeSettings())
+    await empty.rebuild()
+    assert rm.litellm.callbacks == []
