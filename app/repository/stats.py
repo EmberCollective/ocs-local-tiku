@@ -112,6 +112,21 @@ async def list_log(db: Database, *, limit: int, kind: str | None) -> list[dict]:
     return await db.query("SELECT * FROM call_log ORDER BY ts DESC, id DESC LIMIT ?", (limit,))
 
 
+async def daily_between(db: Database, start_day: str, end_day: str) -> list[dict]:
+    """区间内每天的统计行（含 day 键），供趋势序列填充。"""
+    return await db.query(
+        "SELECT * FROM stats_daily WHERE day BETWEEN ? AND ? ORDER BY day",
+        (start_day, end_day),
+    )
+
+
+async def daily_totals(db: Database) -> dict:
+    """全量累计（各字段求和，空表补零）。"""
+    columns = ", ".join(f"COALESCE(SUM({field}), 0) AS {field}" for field in DAILY_FIELDS)
+    row = await db.query_one(f"SELECT {columns} FROM stats_daily")
+    return dict(row) if row else {field: 0 for field in DAILY_FIELDS}
+
+
 async def _upsert_counters(
     db: Database,
     table: str,

@@ -87,6 +87,12 @@ async def export_all(db: Database) -> list[dict]:
     ]
 
 
+async def count_all(db: Database) -> int:
+    """缓存总条数（统计页「总条数」卡片）。"""
+    row = await db.query_one("SELECT COUNT(*) AS n FROM questions")
+    return row["n"] if row else 0
+
+
 async def _log_collision(db: Database, record: NewQuestion) -> None:
     existing = await get_by_key(db, record.cache_key)
     if existing is None:
