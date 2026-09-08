@@ -1,4 +1,4 @@
-<h1><img src="./assets/readme/logo.svg" width="42" alt="ocs-local-tiku logo"> ocs-local-tiku</h1>
+<h1><img src="./assets/readme/logo.png" width="42" alt="ocs-local-tiku logo"> ocs-local-tiku</h1>
 
 <p align="center">
   <img src="./assets/readme/hero.svg" width="100%" alt="ocs-local-tiku —— OCS 网课助手的本地 AI 题库服务：缓存命中毫秒级返回，未命中由 LLM 多 API 兜底">
