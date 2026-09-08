@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg"
+     width="512" height="512" viewBox="0 0 512 512"
+     role="img" aria-labelledby="logo-title logo-desc">
+  <title id="logo-title">ocs-local-tiku logo</title>
+  <desc id="logo-desc">左侧问号与绿色对勾：问号居左上，圆点被对勾从下方兜住，勾的长臂收在右侧中心高度——问题被回答、题目被命中。</desc>
+
+  <!-- badge -->
+  <rect width="512" height="512" rx="115" fill="#0D1117"/>
+  <rect x="1.5" y="1.5" width="509" height="509" rx="113.5" fill="none" stroke="#21262D" stroke-width="3"/>
+
+  <!-- question mark: classic bowl (opens lower-left), gentle stem, dot -->
+  <path d="M 84 175
+           A 86 86 0 1 1 170 261
+           C 168 285 166 305 167 321"
+        fill="none" stroke="#58A6FF" stroke-width="26" stroke-linecap="round"/>
+  <circle cx="170" cy="371" r="19" fill="#58A6FF"/>
+
+  <!-- check mark: cradles the dot from below, arm settles at right-center -->
+  <path d="M 56 307
+           L 160 421
+           L 452 201"
+        fill="none" stroke="#3FB950" stroke-width="30" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>
